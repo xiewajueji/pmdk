@@ -1596,11 +1596,11 @@ obj_pool_close(struct pool_set *set)
  * obj_pool_open -- (internal) open the given pool
  */
 static int
-obj_pool_open(struct pool_set **set, const char *path, unsigned flags,
-	unsigned *nlanes)
+obj_pool_open_addr(struct pool_set **set, const char *path, unsigned flags,
+	unsigned *nlanes, void* addr)
 {
 	if (util_pool_open(set, path, PMEMOBJ_MIN_PART, &Obj_open_attr,
-				nlanes, NULL, flags) != 0) {
+				nlanes, addr, flags) != 0) {
 		LOG(2, "cannot open pool or pool set");
 		return -1;
 	}
@@ -1714,7 +1714,7 @@ obj_replicas_check_basic(PMEMobjpool *pop)
  * (flag POOL_OPEN_COW - internal calls can map a read-only pool if required).
  */
 static PMEMobjpool *
-obj_open_common(const char *path, const char *layout, unsigned flags, int boot)
+obj_open_common_addr(const char *path, const char *layout, unsigned flags, int boot, void* addr)
 {
 	LOG(3, "path %s layout %s flags 0x%x", path, layout, flags);
 
@@ -1729,7 +1729,7 @@ obj_open_common(const char *path, const char *layout, unsigned flags, int boot)
 	 * environment variable whichever is lower.
 	 */
 	unsigned runtime_nlanes = obj_get_nlanes();
-	if (obj_pool_open(&set, path, flags, &runtime_nlanes))
+	if (obj_pool_open_addr(&set, path, flags, &runtime_nlanes, addr))
 		return NULL;
 
 	/* pop is master replica from now on */
@@ -1799,6 +1799,18 @@ replicas_init:
 }
 
 /*
+ * obj_open_common -- open a transactional memory pool (set)
+ *
+ * This routine takes flags and does all the work
+ * (flag POOL_OPEN_COW - internal calls can map a read-only pool if required).
+ */
+static PMEMobjpool *
+obj_open_common(const char *path, const char *layout, unsigned flags, int boot)
+{
+	return obj_open_common_addr(path, layout, flags, boot, NULL);
+}
+
+/*
  * pmemobj_openU -- open a transactional memory pool
  */
 #ifndef _WIN32
@@ -1814,6 +1826,18 @@ pmemobj_openU(const char *path, const char *layout)
 }
 
 #ifndef _WIN32
+static inline
+#endif
+PMEMobjpool *
+pmemobj_openU_addr(const char *path, const char *layout, void* addr)
+{
+	LOG(3, "path %s layout %s", path, layout);
+
+	return obj_open_common_addr(path, layout,
+			COW_at_open ? POOL_OPEN_COW : 0, 1, addr);
+}
+
+#ifndef _WIN32
 /*
  * pmemobj_open -- open a transactional memory pool
  */
@@ -1823,6 +1847,20 @@ pmemobj_open(const char *path, const char *layout)
 	PMEMOBJ_API_START();
 
 	PMEMobjpool *pop = pmemobj_openU(path, layout);
+
+	PMEMOBJ_API_END();
+	return pop;
+}
+
+/*
+ * pmemobj_open -- open a transactional memory pool
+ */
+PMEMobjpool *
+pmemobj_open_addr(const char *path, const char *layout, void *addr)
+{
+	PMEMOBJ_API_START();
+
+	PMEMobjpool *pop = pmemobj_openU_addr(path, layout, addr);
 
 	PMEMOBJ_API_END();
 	return pop;

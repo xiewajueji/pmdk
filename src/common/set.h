@@ -369,6 +369,7 @@ int util_pool_create_uuids(struct pool_set **setp, const char *path,
 int util_part_open(struct pool_set_part *part, size_t minsize, int create_part);
 void util_part_fdclose(struct pool_set_part *part);
 int util_replica_open(struct pool_set *set, unsigned repidx, int flags);
+int util_replica_open_addr(struct pool_set *set, unsigned repidx, int flags, void* addr);
 int util_replica_set_attr(struct pool_replica *rep,
 		const struct rpmem_pool_attr *rattr);
 void util_pool_hdr2attr(struct pool_attr *attr, struct pool_hdr *hdr);
@@ -390,10 +391,10 @@ int util_pool_has_device_dax(struct pool_set *set);
 
 int util_pool_open_nocheck(struct pool_set *set, unsigned flags);
 int util_pool_open(struct pool_set **setp, const char *path, size_t minpartsize,
-	const struct pool_attr *attr, unsigned *nlanes, void *addr,
-	unsigned flags);
+		   const struct pool_attr *attr, unsigned *nlanes, void *addr,
+		   unsigned flags);
 int util_pool_open_remote(struct pool_set **setp, const char *path, int cow,
-	size_t minpartsize, struct rpmem_pool_attr *rattr);
+			  size_t minpartsize, struct rpmem_pool_attr *rattr);
 
 void *util_pool_extend(struct pool_set *set, size_t *size, size_t minpartsize);
 
