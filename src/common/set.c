@@ -3357,12 +3357,11 @@ util_pool_create(struct pool_set **setp, const char *path, size_t poolsize,
 	return util_pool_create_uuids(setp, path, poolsize, minsize,
 			minpartsize, attr, nlanes, can_have_rep, POOL_LOCAL);
 }
-
 /*
  * util_replica_open_local -- (internal) open a memory pool local replica
  */
 static int
-util_replica_open_local(struct pool_set *set, unsigned repidx, int flags)
+util_replica_open_local_addr(struct pool_set *set, unsigned repidx, int flags, void* addr)
 {
 	LOG(3, "set %p repidx %u flags %d", set, repidx, flags);
 
@@ -3372,7 +3371,6 @@ util_replica_open_local(struct pool_set *set, unsigned repidx, int flags)
 	size_t hdrsize = (set->options & (OPTION_SINGLEHDR | OPTION_NOHDRS)) ?
 			0 : Mmap_align;
 	struct pool_replica *rep = set->replica[repidx];
-	void *addr = NULL;
 
 	do {
 		retry_for_contiguous_addr = 0;
@@ -3503,6 +3501,14 @@ err:
 	errno = oerrno;
 	return -1;
 }
+/*
+ * util_replica_open_local -- (internal) open a memory pool local replica
+ */
+static int
+util_replica_open_local(struct pool_set *set, unsigned repidx, int flags)
+{
+	return util_replica_open_local_addr(set, repidx, flags, NULL);
+}
 
 /*
  * util_replica_open_remote -- open a memory pool for remote replica
@@ -3536,6 +3542,19 @@ util_replica_open_remote(struct pool_set *set, unsigned repidx, int flags)
 	LOG(3, "replica #%u addr %p", repidx, rep->part[0].addr);
 
 	return 0;
+}
+/*
+ * util_replica_open -- open a memory pool replica
+ */
+int
+util_replica_open_addr(struct pool_set *set, unsigned repidx, int flags, void* addr)
+{
+	LOG(3, "set %p repidx %u flags %d", set, repidx, flags);
+
+	if (set->replica[repidx]->remote)
+		return util_replica_open_remote(set, repidx, flags);
+
+	return util_replica_open_local_addr(set, repidx, flags, addr);
 }
 
 /*

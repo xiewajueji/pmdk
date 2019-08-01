@@ -71,6 +71,7 @@ extern "C" {
 
 #ifndef _WIN32
 PMEMobjpool *pmemobj_open(const char *path, const char *layout);
+PMEMobjpool *pmemobj_open_addr(const char *path, const char *layout, void *addr);
 #else
 PMEMobjpool *pmemobj_openU(const char *path, const char *layout);
 PMEMobjpool *pmemobj_openW(const wchar_t *path, const wchar_t *layout);
