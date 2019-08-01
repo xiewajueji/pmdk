@@ -79,10 +79,12 @@ PMEMobjpool *pmemobj_openW(const wchar_t *path, const wchar_t *layout);
 
 #ifndef _WIN32
 PMEMobjpool *pmemobj_create(const char *path, const char *layout,
-	size_t poolsize, mode_t mode);
+			    size_t poolsize, mode_t mode);
+PMEMobjpool *pmemobj_create_addr(const char *path, const char *layout,
+			    size_t poolsize, mode_t mode, void *addr);
 #else
 PMEMobjpool *pmemobj_createU(const char *path, const char *layout,
-	size_t poolsize, mode_t mode);
+			     size_t poolsize, mode_t mode);
 PMEMobjpool *pmemobj_createW(const wchar_t *path, const wchar_t *layout,
 	size_t poolsize, mode_t mode);
 #endif
