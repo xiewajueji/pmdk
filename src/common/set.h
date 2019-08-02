@@ -359,12 +359,22 @@ int util_replica_deep_drain(const void *addr, size_t len,
 	struct pool_set *set, unsigned replica_id);
 
 int util_pool_create(struct pool_set **setp, const char *path, size_t poolsize,
-	size_t minsize, size_t minpartsize, const struct pool_attr *attr,
-	unsigned *nlanes, int can_have_rep);
+		     size_t minsize, size_t minpartsize,
+		     const struct pool_attr *attr, unsigned *nlanes,
+		     int can_have_rep);
+int util_pool_create_addr(struct pool_set **setp, const char *path, size_t poolsize,
+		     size_t minsize, size_t minpartsize,
+		     const struct pool_attr *attr, unsigned *nlanes,
+		     int can_have_rep, void* addr);
+
 int util_pool_create_uuids(struct pool_set **setp, const char *path,
 	size_t poolsize, size_t minsize, size_t minpartsize,
 	const struct pool_attr *attr, unsigned *nlanes, int can_have_rep,
 	int remote);
+int util_pool_create_uuids_addr(struct pool_set **setp, const char *path,
+	size_t poolsize, size_t minsize, size_t minpartsize,
+	const struct pool_attr *attr, unsigned *nlanes, int can_have_rep,
+	int remote, void* addr);
 
 int util_part_open(struct pool_set_part *part, size_t minsize, int create_part);
 void util_part_fdclose(struct pool_set_part *part);

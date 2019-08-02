@@ -2616,7 +2616,7 @@ util_replica_set_is_pmem(struct pool_replica *rep)
  * util_replica_map_local -- (internal) map memory pool for local replica
  */
 static int
-util_replica_map_local(struct pool_set *set, unsigned repidx, int flags)
+util_replica_map_local_addr(struct pool_set *set, unsigned repidx, int flags, void* addr)
 {
 	LOG(3, "set %p repidx %u flags %d", set, repidx, flags);
 
@@ -2638,7 +2638,6 @@ util_replica_map_local(struct pool_set *set, unsigned repidx, int flags)
 	/* header size for all headers but the first one */
 	size_t hdrsize = (set->options & (OPTION_SINGLEHDR | OPTION_NOHDRS)) ?
 			0 : Mmap_align;
-	void *addr;
 	struct pool_replica *rep = set->replica[repidx];
 
 	ASSERTeq(rep->remote, NULL);
@@ -2649,7 +2648,9 @@ util_replica_map_local(struct pool_set *set, unsigned repidx, int flags)
 		mapsize = rep->part[0].filesize & ~(Mmap_align - 1);
 
 		/* determine a hint address for mmap() */
-		addr = util_map_hint(rep->resvsize, 0);
+		if (addr == NULL) {
+			addr = util_map_hint(rep->resvsize, 0);
+		}
 		if (addr == MAP_FAILED) {
 			LOG(1, "cannot find a contiguous region of given size");
 			return -1;
@@ -2752,6 +2753,15 @@ err:
 	}
 	errno = oerrno;
 	return -1;
+}
+
+/*
+ * util_replica_map_local -- (internal) map memory pool for local replica
+ */
+static int
+util_replica_map_local(struct pool_set *set, unsigned repidx, int flags)
+{
+	return util_replica_map_local_addr(set, repidx, flags, NULL);
 }
 
 /*
@@ -3104,10 +3114,10 @@ util_print_bad_files_cb(struct part_file *pf, void *arg)
  * containing the info of all the parts of the pool set and replicas.
  */
 int
-util_pool_create_uuids(struct pool_set **setp, const char *path,
+util_pool_create_uuids_addr(struct pool_set **setp, const char *path,
 	size_t poolsize, size_t minsize, size_t minpartsize,
 	const struct pool_attr *attr, unsigned *nlanes, int can_have_rep,
-	int remote)
+	int remote, void* addr)
 {
 	LOG(3, "setp %p path %s poolsize %zu minsize %zu minpartsize %zu "
 		"pattr %p nlanes %p can_have_rep %i remote %i", setp, path,
@@ -3339,6 +3349,34 @@ err_poolset_free:
 	return -1;
 }
 
+int
+util_pool_create_uuids(struct pool_set **setp, const char *path,
+		       size_t poolsize, size_t minsize, size_t minpartsize,
+		       const struct pool_attr *attr, unsigned *nlanes,
+		       int can_have_rep, int remote)
+{
+	return util_pool_create_uuids_addr(setp, path, poolsize, minsize,
+			minpartsize, attr, nlanes, can_have_rep, POOL_LOCAL, NULL);
+}
+/*
+ * util_pool_create -- create a new memory pool (set or a single file)
+ *
+ * On success returns 0 and a pointer to a newly allocated structure
+ * containing the info of all the parts of the pool set and replicas.
+ */
+int
+util_pool_create_addr(struct pool_set **setp, const char *path, size_t poolsize,
+	size_t minsize, size_t minpartsize, const struct pool_attr *attr,
+	unsigned *nlanes, int can_have_rep, void *addr)
+{
+	LOG(3, "setp %p path %s poolsize %zu minsize %zu minpartsize %zu "
+		"attr %p nlanes %p can_have_rep %i", setp, path, poolsize,
+		minsize, minpartsize, attr, nlanes, can_have_rep);
+
+	return util_pool_create_uuids_addr(setp, path, poolsize, minsize,
+			minpartsize, attr, nlanes, can_have_rep, POOL_LOCAL, addr);
+}
+
 /*
  * util_pool_create -- create a new memory pool (set or a single file)
  *
@@ -3350,12 +3388,8 @@ util_pool_create(struct pool_set **setp, const char *path, size_t poolsize,
 	size_t minsize, size_t minpartsize, const struct pool_attr *attr,
 	unsigned *nlanes, int can_have_rep)
 {
-	LOG(3, "setp %p path %s poolsize %zu minsize %zu minpartsize %zu "
-		"attr %p nlanes %p can_have_rep %i", setp, path, poolsize,
-		minsize, minpartsize, attr, nlanes, can_have_rep);
-
-	return util_pool_create_uuids(setp, path, poolsize, minsize,
-			minpartsize, attr, nlanes, can_have_rep, POOL_LOCAL);
+	return util_pool_create_addr(setp, path, poolsize, minsize,
+			minpartsize, attr, nlanes, can_have_rep, NULL);
 }
 /*
  * util_replica_open_local -- (internal) open a memory pool local replica

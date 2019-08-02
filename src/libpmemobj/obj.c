@@ -1354,9 +1354,9 @@ pmemobj_createU_addr(const char *path, const char *layout,
 	else
 		adj_pool_attr.features.incompat &= ~POOL_FEAT_SDS;
 
-	if (util_pool_create(&set, path, poolsize, PMEMOBJ_MIN_POOL,
+	if (util_pool_create_addr(&set, path, poolsize, PMEMOBJ_MIN_POOL,
 			PMEMOBJ_MIN_PART, &adj_pool_attr, &runtime_nlanes,
-			REPLICAS_ENABLED) != 0) {
+			REPLICAS_ENABLED, addr) != 0) {
 		LOG(2, "cannot create pool or pool set");
 		return NULL;
 	}
@@ -1444,7 +1444,7 @@ pmemobj_create_addr(const char *path, const char *layout,
 {
 	PMEMOBJ_API_START();
 
-	PMEMobjpool *pop = pmemobj_createU(path, layout, poolsize, mode);
+	PMEMobjpool *pop = pmemobj_createU_addr(path, layout, poolsize, mode, addr);
 
 	PMEMOBJ_API_END();
 	return pop;
