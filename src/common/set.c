@@ -3287,7 +3287,7 @@ util_pool_create_uuids_addr(struct pool_set **setp, const char *path,
 		goto err_poolset;
 
 	/* map first local replica - it has to exist prior to remote ones */
-	ret = util_replica_map_local(set, 0, flags);
+	ret = util_replica_map_local_addr(set, 0, flags, addr);
 	if (ret != 0)
 		goto err_poolset;
 
@@ -4080,7 +4080,7 @@ util_pool_open(struct pool_set **setp, const char *path, size_t minpartsize,
 		goto err_poolset;
 
 	for (unsigned r = 0; r < set->nreplicas; r++) {
-		if (util_replica_open(set, r, mmap_flags) != 0) {
+		if (util_replica_open_addr(set, r, mmap_flags, addr) != 0) {
 			LOG(2, "replica #%u open failed", r);
 			goto err_replica;
 		}
