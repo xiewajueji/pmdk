@@ -1334,8 +1334,8 @@ no_valid_env:
 static inline
 #endif
 PMEMobjpool *
-pmemobj_createU(const char *path, const char *layout,
-		size_t poolsize, mode_t mode)
+pmemobj_createU_addr(const char *path, const char *layout,
+		size_t poolsize, mode_t mode, void *addr)
 {
 	LOG(3, "path %s layout %s poolsize %zu mode %o",
 			path, layout, poolsize, mode);
@@ -1367,9 +1367,9 @@ pmemobj_createU(const char *path, const char *layout,
 	else
 		adj_pool_attr.features.incompat &= ~POOL_FEAT_SDS;
 
-	if (util_pool_create(&set, path, poolsize, PMEMOBJ_MIN_POOL,
+	if (util_pool_create_addr(&set, path, poolsize, PMEMOBJ_MIN_POOL,
 			PMEMOBJ_MIN_PART, &adj_pool_attr, &runtime_nlanes,
-			REPLICAS_ENABLED) != 0) {
+			REPLICAS_ENABLED, addr) != 0) {
 		LOG(2, "cannot create pool or pool set");
 		return NULL;
 	}
@@ -1438,6 +1438,31 @@ err:
 }
 
 #ifndef _WIN32
+static inline
+#endif
+PMEMobjpool *
+pmemobj_createU(const char *path, const char *layout,
+		size_t poolsize, mode_t mode)
+{
+	return pmemobj_createU_addr(path, layout, poolsize, mode, NULL);
+}
+
+#ifndef _WIN32
+/*
+ * pmemobj_create -- create a transactional memory pool (set)
+ */
+PMEMobjpool *
+pmemobj_create_addr(const char *path, const char *layout,
+		size_t poolsize, mode_t mode, void* addr)
+{
+	PMEMOBJ_API_START();
+
+	PMEMobjpool *pop = pmemobj_createU_addr(path, layout, poolsize, mode, addr);
+
+	PMEMOBJ_API_END();
+	return pop;
+}
+
 /*
  * pmemobj_create -- create a transactional memory pool (set)
  */
@@ -1445,12 +1470,7 @@ PMEMobjpool *
 pmemobj_create(const char *path, const char *layout,
 		size_t poolsize, mode_t mode)
 {
-	PMEMOBJ_API_START();
-
-	PMEMobjpool *pop = pmemobj_createU(path, layout, poolsize, mode);
-
-	PMEMOBJ_API_END();
-	return pop;
+	return pmemobj_create_addr(path, layout, poolsize, mode, NULL);
 }
 #else
 /*

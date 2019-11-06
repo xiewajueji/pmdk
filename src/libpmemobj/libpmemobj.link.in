@@ -38,7 +38,9 @@ LIBPMEMOBJ_1.0 {
 		pmemobj_set_funcs;
 		pmemobj_errormsg;
 		pmemobj_create;
+		pmemobj_create_addr;
 		pmemobj_open;
+		pmemobj_open_addr;
 		pmemobj_close;
 		pmemobj_check;
 		pmemobj_ctl_exec;
