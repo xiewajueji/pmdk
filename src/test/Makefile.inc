@@ -216,6 +216,15 @@ OBJS +=\
 	$(TOP)/src/nondebug/common/util_posix.o\
 	$(TOP)/src/nondebug/common/uuid.o\
 	$(call osdep, $(TOP)/src/nondebug/common/uuid,.o)
+	$(TOP)/src/nondebug/libpmem2/pmem2_utils.o\
+	$(TOP)/src/nondebug/libpmem2/config.o\
+	$(TOP)/src/nondebug/libpmem2/config_posix.o
+
+ifeq ($(OS_KERNEL_NAME),Linux)
+OBJS += $(TOP)/src/nondebug/libpmem2/pmem2_utils_linux.o
+else
+OBJS += $(TOP)/src/nondebug/libpmem2/pmem2_utils_other.o
+endif
 
 INCS += -I$(TOP)/src/common
 endif
@@ -248,7 +257,16 @@ OBJS +=\
 	$(TOP)/src/debug/common/util.o\
 	$(TOP)/src/debug/common/util_posix.o\
 	$(TOP)/src/debug/common/uuid.o\
-	$(call osdep, $(TOP)/src/debug/common/uuid,.o)
+	$(call osdep, $(TOP)/src/debug/common/uuid,.o)\
+	$(TOP)/src/debug/libpmem2/pmem2_utils.o\
+	$(TOP)/src/debug/libpmem2/config.o\
+	$(TOP)/src/debug/libpmem2/config_posix.o
+
+ifeq ($(OS_KERNEL_NAME),Linux)
+OBJS += $(TOP)/src/debug/libpmem2/pmem2_utils_linux.o
+else
+OBJS += $(TOP)/src/debug/libpmem2/pmem2_utils_other.o
+endif
 
 INCS += -I$(TOP)/src/common
 endif
@@ -259,19 +277,19 @@ STATIC_DEBUG_LIBS += $(LIBS_DIR)/debug/libpmem.a
 STATIC_NONDEBUG_LIBS += $(LIBS_DIR)/nondebug/libpmem.a
 endif
 
+ifeq ($(LIBPMEM2),y)
+DYNAMIC_LIBS += -lpmem2
+STATIC_DEBUG_LIBS += $(LIBS_DIR)/debug/libpmem2.a
+STATIC_NONDEBUG_LIBS += $(LIBS_DIR)/nondebug/libpmem2.a
+endif
+
 ifeq ($(LIBRPMEM),y)
 DYNAMIC_LIBS += -lrpmem
 STATIC_DEBUG_LIBS += $(LIBS_DIR)/debug/librpmem.a
 STATIC_NONDEBUG_LIBS += $(LIBS_DIR)/nondebug/librpmem.a
 endif
 
-ifeq ($(LIBVMEM),y)
-DYNAMIC_LIBS += -lvmem
-STATIC_DEBUG_LIBS += $(LIBS_DIR)/debug/libvmem.a
-STATIC_NONDEBUG_LIBS += $(LIBS_DIR)/nondebug/libvmem.a
-endif
-
-ifneq ($(LIBPMEMCOMMON)$(LIBPMEM)$(LIBPMEMPOOL)$(LIBPMEMBLK)$(LIBPMEMLOG)$(LIBPMEMOBJ)$(LIBVMEM)$(LIBRPMEM),)
+ifneq ($(LIBPMEMCOMMON)$(LIBPMEM)$(LIBPMEMPOOL)$(LIBPMEMBLK)$(LIBPMEMLOG)$(LIBPMEMOBJ)$(LIBRPMEM),)
 LIBS += -pthread
 endif
 
@@ -283,7 +301,6 @@ ifneq ($(LIBPMEMCOMMON)$(LIBPMEMPOOL)$(LIBPMEMBLK)$(LIBPMEMLOG)$(LIBPMEMOBJ),)
 CFLAGS += $(LIBNDCTL_CFLAGS)
 LIBS += $(LIBNDCTL_LIBS)
 endif
-
 
 #
 # This is a helper function to be combined with usage of macros available
@@ -320,9 +337,7 @@ CFLAGS  = -std=gnu99
 CFLAGS += -Wmissing-prototypes
 CFLAGS += $(COMMON_FLAGS)
 
-ifneq ($(USING_JEMALLOC_HEADERS),y)
 CFLAGS += -Wsign-conversion
-endif
 
 ifeq ($(WUNREACHABLE_CODE_RETURN_AVAILABLE), y)
 CFLAGS += -Wunreachable-code-return

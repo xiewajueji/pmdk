@@ -36,6 +36,11 @@ set -e
 export LC_ALL="C"
 #export LC_ALL="en_US.UTF-8"
 
+if ! [ -f ../envconfig.sh ]; then
+	echo >&2 "envconfig.sh is missing -- is the tree built?"
+	exit 1
+fi
+
 . ../testconfig.sh
 . ../envconfig.sh
 
@@ -114,7 +119,6 @@ fi
 
 export UNITTEST_LOG_LEVEL GREP TEST FS BUILD CHECK_TYPE CHECK_POOL VERBOSE SUFFIX
 
-VMMALLOC=libvmmalloc.so.1
 TOOLS=../tools
 LIB_TOOLS="../../tools"
 # Paths to some useful tools
@@ -306,8 +310,6 @@ fi
 # The default is to turn on library logging to level 3 and save it to local files.
 # Tests that don't want it on, should override these environment variables.
 #
-export VMEM_LOG_LEVEL=3
-export VMEM_LOG_FILE=vmem$UNITTEST_NUM.log
 export PMEM_LOG_LEVEL=3
 export PMEM_LOG_FILE=pmem$UNITTEST_NUM.log
 export PMEMBLK_LOG_LEVEL=3
@@ -319,10 +321,6 @@ export PMEMOBJ_LOG_FILE=pmemobj$UNITTEST_NUM.log
 export PMEMPOOL_LOG_LEVEL=3
 export PMEMPOOL_LOG_FILE=pmempool$UNITTEST_NUM.log
 export PMREORDER_LOG_FILE=pmreorder$UNITTEST_NUM.log
-
-export VMMALLOC_POOL_SIZE=$((16 * 1024 * 1024))
-export VMMALLOC_LOG_LEVEL=3
-export VMMALLOC_LOG_FILE=vmmalloc$UNITTEST_NUM.log
 
 export OUT_LOG_FILE=out$UNITTEST_NUM.log
 export ERR_LOG_FILE=err$UNITTEST_NUM.log
@@ -482,7 +480,7 @@ function create_file() {
 	shift
 	for file in $*
 	do
-		$DD if=/dev/zero of=$file bs=1M count=$size iflag=count_bytes >> $PREP_LOG_FILE
+		$DD if=/dev/zero of=$file bs=1M count=$size iflag=count_bytes status=none >> $PREP_LOG_FILE
 	done
 }
 
@@ -836,16 +834,6 @@ function expect_normal_exit() {
 		export VALGRIND_OPTS="$VALGRIND_OPTS --suppressions=../memcheck-dlopen.supp"
 	fi
 
-	# in case of preloading libvmmalloc.so.1 force valgrind to not override malloc
-	if [ -n "$VALGRINDEXE" -a -n "$TEST_LD_PRELOAD" ]; then
-		if [ $(valgrind_version) -ge 312 ]; then
-			preload=`basename $TEST_LD_PRELOAD`
-		fi
-		if [ "$preload" == "$VMMALLOC" ]; then
-			export VALGRIND_OPTS="$VALGRIND_OPTS --soname-synonyms=somalloc=nouserintercepts"
-		fi
-	fi
-
 	local REMOTE_VALGRIND_LOG=0
 	if [ "$CHECK_TYPE" != "none" ]; then
 	        case "$1"
@@ -950,16 +938,6 @@ function expect_abnormal_exit() {
 			msg "$UNITTEST_NAME: SKIP: TRACE is not supported if test is executed on remote nodes"
 			exit 0
 		esac
-	fi
-
-	# in case of preloading libvmmalloc.so.1 force valgrind to not override malloc
-	if [ -n "$VALGRINDEXE" -a -n "$TEST_LD_PRELOAD" ]; then
-		if [ $(valgrind_version) -ge 312 ]; then
-			preload=`basename $TEST_LD_PRELOAD`
-		fi
-		if [ "$preload" == "$VMMALLOC" ]; then
-			export VALGRIND_OPTS="$VALGRIND_OPTS --soname-synonyms=somalloc=nouserintercepts"
-		fi
 	fi
 
 	if [ "$CHECK_TYPE" = "drd" ]; then
@@ -1441,7 +1419,6 @@ require_dax_device_alignments() {
 	require_node_dax_device_alignments -1 $*
 }
 
-
 #
 # require_fs_type -- only allow script to continue for a certain fs type
 #
@@ -1457,7 +1434,6 @@ function require_fs_type() {
 	verbose_msg "$UNITTEST_NAME: SKIP fs-type $FS ($* required)"
 	exit 0
 }
-
 
 #
 # require_native_fallocate -- verify if filesystem supports fallocate
@@ -2018,32 +1994,32 @@ function require_no_sds() {
 }
 
 #
-# is_ndctl_ge_63 -- check if binary is compiled with libndctl 63+
+# is_ndctl_enabled -- check if binary is compiled with libndctl
 #
-#	usage: is_ndctl_ge_63 <binary>
+#	usage: is_ndctl_enabled <binary>
 #
-function is_ndctl_ge_63() {
+function is_ndctl_enabled() {
 	local binary=$1
 	local dir=.
 	if [ -z "$binary" ]; then
-		fatal "is_ndctl_ge_63: error: no binary found"
+		fatal "is_ndctl_enabled: error: no binary found"
 	fi
 
 	strings ${binary} 2>&1 | \
-		grep -q "compiled with libndctl 63+" && true
+		grep -q "compiled with libndctl" && true
 
 	return $?
 }
 
 #
-# require_user_bb -- checks if the binary has support for unprivileged
-#	bad block iteration
+# require_bb_enabled_by_default -- check if the binary has bad block
+#                                     checking feature enabled by default
 #
-#	usage: require_user_bb <binary>
+#	usage: require_bb_enabled_by_default <binary>
 #
-function require_user_bb() {
-	if ! is_ndctl_ge_63 $1 &> /dev/null ; then
-		msg "$UNITTEST_NAME: SKIP unprivileged bad block iteration not supported"
+function require_bb_enabled_by_default() {
+	if ! is_ndctl_enabled $1 &> /dev/null ; then
+		msg "$UNITTEST_NAME: SKIP bad block checking feature disabled by default"
 		exit 0
 	fi
 
@@ -2051,14 +2027,14 @@ function require_user_bb() {
 }
 
 #
-# require_su_bb -- checks if the binary does not have support for
-#	unprivileged bad block iteration
+# require_bb_disabled_by_default -- check if the binary does not have bad
+#                                      block checking feature enabled by default
 #
-#	usage: require_su_bb <binary>
+#	usage: require_bb_disabled_by_default <binary>
 #
-function require_su_bb() {
-	if is_ndctl_ge_63 $1 &> /dev/null ; then
-		msg "$UNITTEST_NAME: SKIP unprivileged bad block iteration supported"
+function require_bb_disabled_by_default() {
+	if is_ndctl_enabled $1 &> /dev/null ; then
+		msg "$UNITTEST_NAME: SKIP bad block checking feature enabled by default"
 		exit 0
 	fi
 	return 0
@@ -2088,12 +2064,10 @@ function run_command()
 	fi
 }
 
-
 #
 # validate_node_number -- validate a node number
 #
 function validate_node_number() {
-
 	[ $1 -gt $NODES_MAX ] \
 		&& fatal "error: node number ($1) greater than maximum allowed node number ($NODES_MAX)"
 	return 0
@@ -2632,7 +2606,6 @@ function require_mmap_under_valgrind() {
 function setup() {
 
 	DIR=$DIR$SUFFIX
-	export VMMALLOC_POOL_DIR="$DIR"
 
 	# writes test working directory to temporary file
 	# that allows read location of data after test failure
@@ -3597,13 +3570,83 @@ function require_max_devdax_size() {
 }
 
 #
-# require_nfit_tests_enabled - check if tests using the nfit_test kernel module are not enabled
+# require_max_block_size -- checks that block size is smaller or equal than requested
 #
-function require_nfit_tests_enabled() {
-	if [ "$ENABLE_NFIT_TESTS" != "y" ]; then
-		msg "$UNITTEST_NAME: SKIP: tests using the nfit_test kernel module are not enabled in testconfig.sh (ENABLE_NFIT_TESTS)"
+# usage: require_max_block_size <file> <max-block-size>
+#
+function require_max_block_size() {
+	cur_sz=$(stat --file-system --format=%S $1)
+	max_size=$2
+	if [ $cur_sz -gt $max_size ]; then
+		msg "$UNITTEST_NAME: SKIP: block size of $1 is too big for this test (max $2 required)"
 		exit 0
 	fi
+}
+
+#
+# require_badblock_tests_enabled - check if tests for bad block support are not enabled
+# Input arguments:
+# 1) test device type
+#
+function require_badblock_tests_enabled() {
+	require_sudo_allowed
+	require_command ndctl
+	require_bb_enabled_by_default $PMEMPOOL$EXESUFFIX
+
+	if [ "$BADBLOCK_TEST_TYPE" == "nfit_test" ]; then
+
+		require_kernel_module nfit_test
+
+		# nfit_test dax device is created by the test and is
+		# used directly - no device dax path is needed to be provided by the
+		# user. Some tests though may use an additional filesystem for the
+		# pool replica - hence 'any' filesystem is required.
+		if [ $1 == "dax_device" ]; then
+			require_fs_type any
+
+		# nfit_test block device is created by the test and mounted on
+		# a filesystem of any type provided by the user
+		elif [ $1 == "block_device" ]; then
+			require_fs_type any
+		fi
+
+	elif [ "$BADBLOCK_TEST_TYPE" == "real_pmem" ]; then
+
+		if [ $1 == "dax_device" ]; then
+			require_fs_type any
+			require_dax_devices 1
+			require_binary $DAXIO$EXESUFFIX
+
+		elif [ $1 == "block_device" ]; then
+			require_fs_type pmem
+		fi
+
+	else
+		msg "$UNITTEST_NAME: SKIP: bad block tests are not enabled in testconfig.sh"
+		exit 0
+	fi
+}
+
+#
+# require_badblock_tests_enabled_node - check if tests for bad block support are not enabled
+# on given remote node
+#
+function require_badblock_tests_enabled_node() {
+	require_sudo_allowed_node $1
+	require_command_node $1 ndctl
+	require_bb_enabled_by_default $PMEMPOOL$EXESUFFIX
+
+	if [ "$BADBLOCK_TEST_TYPE" == "nfit_test" ]; then
+		require_kernel_module_node $1 nfit_test
+	elif [ "$BADBLOCK_TEST_TYPE" == "real_pmem" ]; then
+		:
+	else
+		msg "$UNITTEST_NAME: SKIP: bad block tests are not enabled in testconfig.sh"
+		exit 0
+	fi
+	require_sudo_allowed
+	require_kernel_module nfit_test
+	require_command ndctl
 }
 
 #

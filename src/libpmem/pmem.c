@@ -272,9 +272,9 @@ pmem_msync(const void *addr, size_t len)
 	VALGRIND_DO_CHECK_MEM_IS_ADDRESSABLE(addr, len);
 
 	/*
-	 * msync requires len to be a multiple of pagesize, so
-	 * adjust addr and len to represent the full 4k chunks
-	 * covering the given range.
+	 * msync requires addr to be a multiple of pagesize but there are no
+	 * requirements for len. Align addr down and change len so that
+	 * [addr, addr + len) still contains initial range.
 	 */
 
 	/* increase len by the amount we gain when we round addr down */
@@ -525,7 +525,7 @@ pmem_map_fileU(const char *path, size_t len, int flags,
 			}
 		}
 	} else {
-		ssize_t actual_size = util_file_get_size(path);
+		ssize_t actual_size = util_fd_get_size(fd);
 		if (actual_size < 0) {
 			ERR("stat %s: negative size", path);
 			errno = EINVAL;

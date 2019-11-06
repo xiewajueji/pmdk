@@ -1,5 +1,5 @@
 /*
- * Copyright 2017-2018, Intel Corporation
+ * Copyright 2017-2019, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -174,7 +174,7 @@ do_cmpmap(void)
 		fprintf(stderr, "opening %s failed, errno %d\n", File1, errno);
 		return -1;
 	}
-	ssize_t size_tmp = util_file_get_size(File1);
+	ssize_t size_tmp = util_fd_get_size(fd1);
 	if (size_tmp < 0) {
 		fprintf(stderr, "getting size of %s failed, errno %d\n", File1,
 				errno);
@@ -199,7 +199,7 @@ do_cmpmap(void)
 			ret = -1;
 			goto out_close1;
 		}
-		size_tmp = util_file_get_size(File2);
+		size_tmp = util_fd_get_size(fd2);
 		if (size_tmp < 0) {
 			fprintf(stderr, "getting size of %s failed, errno %d\n",
 					File2, errno);
@@ -229,7 +229,7 @@ do_cmpmap(void)
 
 	/* map the first file */
 	void *addr1;
-	if ((addr1 = util_map(fd1, size1, MAP_SHARED,
+	if ((addr1 = util_map(fd1, 0, size1, MAP_SHARED,
 			1, 0, NULL)) == MAP_FAILED) {
 		fprintf(stderr, "mmap failed, file %s, length %zu, offset 0,"
 				" errno %d\n", File1, size1, errno);
@@ -239,7 +239,7 @@ do_cmpmap(void)
 
 	/* map the second file, or do anonymous mapping to get zeroed bytes */
 	void *addr2;
-	if ((addr2 = util_map(fd2, size2, flag, 1, 0, NULL)) == MAP_FAILED) {
+	if ((addr2 = util_map(fd2, 0, size2, flag, 1, 0, NULL)) == MAP_FAILED) {
 		fprintf(stderr, "mmap failed, file %s, length %zu, errno %d\n",
 			File2 ? File2 : "(anonymous)", size2, errno);
 		ret = -1;
@@ -268,7 +268,6 @@ out_close1:
 	(void) os_close(fd1);
 	return ret;
 }
-
 
 int
 main(int argc, char *argv[])

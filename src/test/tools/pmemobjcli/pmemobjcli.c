@@ -1012,7 +1012,6 @@ pocli_pmemobj_pool_by_ptr(struct pocli_ctx *ctx, struct pocli_args *args)
 	enum pocli_ret ret;
 	uint64_t offset;
 
-
 	if ((ret = pocli_args_obj(ctx, args, 1, &oid)))
 		return ret;
 	if ((ret = pocli_args_number(args, 2, &offset)))
@@ -1222,8 +1221,10 @@ pocli_pmemobj_list_remove(struct pocli_ctx *ctx, struct pocli_args *args)
 		return pocli_err(ctx, POCLI_ERR_ARGS,
 					"pmemobj_list_remove() failed\n");
 
-	if (if_free)
+	if (if_free) {
 		*oid = OID_NULL;
+		pmemobj_persist(ctx->pop, oid, sizeof(PMEMoid));
+	}
 
 	pocli_printf(ctx, "%s(%p, %s, %u): off = 0x%jx uuid = 0x%jx\n",
 				args->argv[0], oidp, args->argv[2], if_free,
@@ -2385,7 +2386,6 @@ main(int argc, char *argv[])
 				perror(optarg);
 				goto out;
 			}
-
 
 			break;
 		case 'p':

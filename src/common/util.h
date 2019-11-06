@@ -100,10 +100,12 @@ void util_free_UTF16(wchar_t *str);
 int util_toUTF16_buff(const char *in, wchar_t *out, size_t out_size);
 int util_toUTF8_buff(const wchar_t *in, char *out, size_t out_size);
 void util_suppress_errmsg(void);
+int util_lasterror_to_errno(unsigned long err);
 #endif
 
 #define UTIL_MAX_ERR_MSG 128
 void util_strerror(int errnum, char *buff, size_t bufflen);
+void util_strwinerror(unsigned long err, char *buff, size_t bufflen);
 
 void util_set_alloc_funcs(
 		void *(*malloc_func)(size_t size),
@@ -311,7 +313,6 @@ typedef enum {
 		    order == memory_order_acquire)\
 		_ReadWriteBarrier();\
 	} while (0)
-
 
 #define util_atomic_load_explicit32 util_atomic_load_explicit
 #define util_atomic_load_explicit64 util_atomic_load_explicit

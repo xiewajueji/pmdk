@@ -57,9 +57,9 @@
 	(((uintptr_t)(ptr) & (CACHELINE_SIZE - 1)) == 0)
 
 /*
- * ulog_by_offset -- (internal) calculates the ulog pointer
+ * ulog_by_offset -- calculates the ulog pointer
  */
-static struct ulog *
+struct ulog *
 ulog_by_offset(size_t offset, const struct pmem_ops *p_ops)
 {
 	if (offset == 0)
@@ -161,7 +161,7 @@ ulog_entry_valid(struct ulog *ulog, const struct ulog_entry_base *entry)
  */
 void
 ulog_construct(uint64_t offset, size_t capacity, uint64_t gen_num,
-		int flush, const struct pmem_ops *p_ops)
+		int flush, uint64_t flags, const struct pmem_ops *p_ops)
 {
 	struct ulog *ulog = ulog_by_offset(offset, p_ops);
 	ASSERTne(ulog, NULL);
@@ -172,12 +172,16 @@ ulog_construct(uint64_t offset, size_t capacity, uint64_t gen_num,
 	ulog->checksum = 0;
 	ulog->next = 0;
 	ulog->gen_num = gen_num;
+	ulog->flags = flags;
 	memset(ulog->unused, 0, sizeof(ulog->unused));
+
+	/* we only need to zero out the header of ulog's first entry */
+	size_t zeroed_data = CACHELINE_ALIGN(sizeof(struct ulog_entry_base));
 
 	if (flush) {
 		pmemops_xflush(p_ops, ulog, sizeof(*ulog),
 			PMEMOBJ_F_RELAXED);
-		pmemops_memset(p_ops, ulog->data, 0, capacity,
+		pmemops_memset(p_ops, ulog->data, 0, zeroed_data,
 			PMEMOBJ_F_MEM_NONTEMPORAL |
 			PMEMOBJ_F_MEM_NODRAIN |
 			PMEMOBJ_F_RELAXED);
@@ -186,7 +190,7 @@ ulog_construct(uint64_t offset, size_t capacity, uint64_t gen_num,
 		 * We want to avoid replicating zeroes for every ulog of every
 		 * lane, to do that, we need to use plain old memset.
 		 */
-		memset(ulog->data, 0, capacity);
+		memset(ulog->data, 0, zeroed_data);
 	}
 
 	VALGRIND_REMOVE_FROM_TX(ulog, SIZEOF_ULOG(capacity));
@@ -254,9 +258,15 @@ ulog_rebuild_next_vec(struct ulog *ulog, struct ulog_next *next,
 int
 ulog_reserve(struct ulog *ulog,
 	size_t ulog_base_nbytes, size_t gen_num,
-	size_t *new_capacity, ulog_extend_fn extend,
-	struct ulog_next *next, const struct pmem_ops *p_ops)
+	int auto_reserve, size_t *new_capacity,
+	ulog_extend_fn extend, struct ulog_next *next,
+	const struct pmem_ops *p_ops)
 {
+	if (!auto_reserve) {
+		LOG(1, "cannot auto reserve next ulog");
+		return -1;
+	}
+
 	size_t capacity = ulog_base_nbytes;
 
 	uint64_t offset;
@@ -401,6 +411,22 @@ ulog_entry_val_create(struct ulog *ulog, size_t offset, uint64_t *dest,
 }
 
 /*
+ * ulog_clobber_entry -- zeroes out a single log entry header
+ */
+void
+ulog_clobber_entry(const struct ulog_entry_base *e,
+	const struct pmem_ops *p_ops)
+{
+	static const size_t aligned_entry_size =
+		CACHELINE_ALIGN(sizeof(struct ulog_entry_base));
+
+	VALGRIND_ADD_TO_TX(e, aligned_entry_size);
+	pmemops_memset(p_ops, (char *)e, 0, aligned_entry_size,
+		PMEMOBJ_F_MEM_NONTEMPORAL);
+	VALGRIND_REMOVE_FROM_TX(e, aligned_entry_size);
+}
+
+/*
  * ulog_entry_buf_create -- atomically creates a buffer entry in the log
  */
 struct ulog_entry_buf *
@@ -487,6 +513,18 @@ ulog_entry_buf_create(struct ulog *ulog, size_t offset, uint64_t gen_num,
 	VALGRIND_REMOVE_FROM_TX(e, CACHELINE_SIZE);
 
 	pmemops_drain(p_ops);
+
+	/*
+	 * Allow having uninitialized data in the buffer - this requires marking
+	 * data as defined so that comparing checksums is not reported as an
+	 * error by memcheck.
+	 */
+#if VG_MEMCHECK_ENABLED
+	if (On_valgrind) {
+		VALGRIND_MAKE_MEM_DEFINED(e->data, ncopy + rcopy + lcopy);
+		VALGRIND_MAKE_MEM_DEFINED(&e->checksum, sizeof(e->checksum));
+	}
+#endif
 
 	ASSERT(ulog_entry_valid(ulog, &e->base));
 
@@ -589,6 +627,76 @@ ulog_inc_gen_num(struct ulog *ulog, const struct pmem_ops *p_ops)
 }
 
 /*
+ * ulog_free_by_ptr_next -- free all ulogs starting from the indicated one.
+ * Function returns 1 if any ulog have been freed or unpinned, 0 otherwise.
+ */
+int
+ulog_free_next(struct ulog *u, const struct pmem_ops *p_ops,
+		ulog_free_fn ulog_free, ulog_rm_user_buffer_fn user_buff_remove,
+		uint64_t flags)
+{
+	int ret = 0;
+
+	if (u == NULL)
+		return ret;
+
+	VEC(, uint64_t *) ulogs_internal_except_first;
+	VEC_INIT(&ulogs_internal_except_first);
+
+	/*
+	 * last_internal - pointer to a last found ulog allocated
+	 * internally by the libpmemobj
+	 */
+	struct ulog *last_internal = u;
+	struct ulog *current;
+
+	/* iterate all linked logs and unpin user defined */
+	while ((flags & ULOG_ANY_USER_BUFFER) &&
+		last_internal != NULL && last_internal->next != 0) {
+		current = ulog_by_offset(last_internal->next, p_ops);
+		/*
+		 * handle case with user logs one after the other
+		 * or mixed user and internal logs
+		 */
+		while (current != NULL &&
+				(current->flags & ULOG_USER_OWNED)) {
+
+			last_internal->next = current->next;
+			pmemops_persist(p_ops, &last_internal->next,
+				sizeof(last_internal->next));
+
+			user_buff_remove(p_ops->base, current);
+
+			current = ulog_by_offset(last_internal->next, p_ops);
+			/* any ulog has been unpinned - set return value to 1 */
+			ret = 1;
+		}
+		last_internal = ulog_by_offset(last_internal->next, p_ops);
+	}
+
+	while (u->next != 0) {
+		if (VEC_PUSH_BACK(&ulogs_internal_except_first,
+			&u->next) != 0) {
+			/* this is fine, it will just use more pmem */
+			LOG(1, "unable to free transaction logs memory");
+			goto out;
+		}
+		u = ulog_by_offset(u->next, p_ops);
+	}
+
+	/* free non-user defined logs */
+	uint64_t *ulog_ptr;
+	VEC_FOREACH_REVERSE(ulog_ptr, &ulogs_internal_except_first) {
+		ulog_free(p_ops->base, ulog_ptr);
+		ret = 1;
+	}
+
+out:
+	VEC_DELETE(&ulogs_internal_except_first);
+	return ret;
+}
+
+/*
  * ulog_clobber -- zeroes the metadata of the ulog
  */
 void
@@ -614,38 +722,10 @@ int
 ulog_clobber_data(struct ulog *ulog_first,
 	size_t nbytes, size_t ulog_base_nbytes,
 	struct ulog_next *next, ulog_free_fn ulog_free,
+	ulog_rm_user_buffer_fn user_buff_remove,
 	const struct pmem_ops *p_ops, unsigned flags)
 {
 	ASSERTne(ulog_first, NULL);
-
-	/* --------------- */
-	/*
-	 * This is a quick workaround for issue injected in commit:
-	 * 2ab13304664b353b82730f49b78fc67eea33b25b (ulog-invalidation).
-	 * This patrt of the code for sure impact performance,
-	 * and needs to be removed when proper fix will be implemented.
-	 */
-	size_t rcapacity = ulog_base_nbytes;
-	size_t numlog = 0;
-
-	for (struct ulog *r = ulog_first; r != NULL; ) {
-		size_t nzero = MIN(nbytes, rcapacity);
-		VALGRIND_ADD_TO_TX(r->data, nzero);
-		pmemops_memset(p_ops, r->data, 0, nzero, PMEMOBJ_F_MEM_WC);
-		VALGRIND_ADD_TO_TX(r->data, nzero);
-		nbytes -= nzero;
-
-		if (nbytes == 0)
-			break;
-
-		r = ulog_by_offset(VEC_ARR(next)[numlog++], p_ops);
-		if (numlog > 1)
-			break;
-
-		ASSERTne(r, NULL);
-		rcapacity = r->capacity;
-	}
-	/* -------------- */
 
 	/* In case of abort we need to increment counter in the first ulog. */
 	if (flags & ULOG_INC_FIRST_GEN_NUM)
@@ -669,41 +749,44 @@ ulog_clobber_data(struct ulog *ulog_first,
 		 */
 		ulog_inc_gen_num(ulog_second, NULL);
 
+	/* The ULOG_ANY_USER_BUFFER flag indicates more than one ulog exist */
+	if (flags & ULOG_ANY_USER_BUFFER)
+		ASSERTne(ulog_second, NULL);
+
+	struct ulog *u;
 	/*
-	 * To make sure that transaction logs do not occupy too much of space,
-	 * all of them, expect for the first one, are freed at the end of
-	 * the operation. The reasoning for this is that pmalloc() is
-	 * a relatively cheap operation for transactions where many hundreds of
-	 * kilobytes are being snapshot, and so, allocating and freeing the
-	 * buffer for each transaction is an acceptable overhead for the average
-	 * case.
+	 * only if there was any user buffer it make sense to check
+	 * if the second ulog is allocated by user
 	 */
-	struct ulog *u = flags & ULOG_FREE_AFTER_FIRST ?
-		ulog_first : ulog_second;
+	if ((flags & ULOG_ANY_USER_BUFFER) &&
+		(ulog_second->flags & ULOG_USER_OWNED)) {
+		/*
+		 * function ulog_free_next() starts from 'next' ulog,
+		 * so to start from the second ulog we need to
+		 * pass the first one
+		 */
+		u = ulog_first;
+	} else {
+		/*
+		 * To make sure that transaction logs do not occupy too
+		 * much of space, all of them, expect for the first one,
+		 * are freed at the end of the operation. The reasoning for
+		 * this is that pmalloc() is a relatively cheap operation for
+		 * transactions where many hundreds of kilobytes are being
+		 * snapshot, and so, allocating and freeing the buffer for
+		 * each transaction is an acceptable overhead for the average
+		 * case.
+		 */
+		if (flags & ULOG_FREE_AFTER_FIRST)
+			u = ulog_first;
+		else
+			u = ulog_second;
+	}
+
 	if (u == NULL)
 		return 0;
 
-	VEC(, uint64_t *) logs_past_first;
-	VEC_INIT(&logs_past_first);
-
-	size_t next_offset;
-	while (u != NULL && ((next_offset = u->next) != 0)) {
-		if (VEC_PUSH_BACK(&logs_past_first, &u->next) != 0) {
-			/* this is fine, it will just use more pmem */
-			LOG(1, "unable to free transaction logs memory");
-			goto out;
-		}
-		u = ulog_by_offset(u->next, p_ops);
-	}
-
-	uint64_t *ulog_ptr;
-	VEC_FOREACH_REVERSE(ulog_ptr, &logs_past_first) {
-		ulog_free(p_ops->base, ulog_ptr);
-	}
-
-out:
-	VEC_DELETE(&logs_past_first);
-	return 1;
+	return ulog_free_next(u, p_ops, ulog_free, user_buff_remove, flags);
 }
 
 /*

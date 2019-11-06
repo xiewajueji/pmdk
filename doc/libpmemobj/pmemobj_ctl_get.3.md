@@ -43,14 +43,12 @@ date: pmemobj API version 2.3
 [CTL EXTERNAL CONFIGURATION](#ctl-external-configuration)<br />
 [SEE ALSO](#see-also)<br />
 
-
 # NAME #
 
 _UW(pmemobj_ctl_get),
 _UW(pmemobj_ctl_set),
 _UW(pmemobj_ctl_exec)
 - Query and modify libpmemobj internal behavior (EXPERIMENTAL)
-
 
 # SYNOPSIS #
 
@@ -66,7 +64,6 @@ _UWFUNCR2(int, pmemobj_ctl_exec, PMEMobjpool *pop, *name, void *arg,
 ```
 
 _UNICODE()
-
 
 # DESCRIPTION #
 
@@ -88,7 +85,6 @@ on success and -1 on failure, unless otherwise specified in the entry point
 description.
 
 See more in **pmem_ctl**(5) man page.
-
 
 # CTL NAMESPACE #
 
@@ -121,6 +117,14 @@ tx.debug.skip_expensive_checks | rw | - | int | int | - | boolean
 
 Turns off some expensive checks performed by the transaction module in "debug"
 builds. Ignored in "release" builds.
+
+tx.debug.verify_user_buffers | rw | - | int | int | - | boolean
+
+Enables verification of user buffers provided by
+**pmemobj_tx_log_append_buffer**(3) API. For now the only verified aspect
+is whether the same buffer is used simultaneously in 2 or more transactions
+or more than once in the same transaction. This value should not be modified
+at runtime if any transaction for the current pool is in progress.
 
 tx.cache.size | rw | - | long long | long long | - | integer
 
@@ -375,7 +379,6 @@ The second method of loading an external configuration is to set the
 a sequence of ctl queries.
 
 See more in **pmem_ctl**(5) man page.
-
 
 # SEE ALSO #
 

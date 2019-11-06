@@ -52,15 +52,24 @@ SOURCE =\
 	$(COMMON)/os_deep_linux.c\
 	$(COMMON)/out.c\
 	$(COMMON)/pool_hdr.c\
+	$(COMMON)/rand.c\
 	$(COMMON)/set.c\
 	$(COMMON)/shutdown_state.c\
 	$(COMMON)/util.c\
 	$(COMMON)/util_posix.c\
 	$(COMMON)/uuid.c\
-	$(call osdep, $(COMMON)/uuid,.c)
+	$(call osdep, $(COMMON)/uuid,.c)\
+	$(PMEM2)/pmem2_utils.c\
+	$(PMEM2)/config.c\
+	$(PMEM2)/config_posix.c
 
 ifeq ($(OS_KERNEL_NAME),Linux)
 SOURCE += $(COMMON)/os_auto_flush_linux.c
+SOURCE += $(PMEM2)/pmem2_utils_linux.c
+else ifeq ($(OS_KERNEL_NAME),FreeBSD)
+SOURCE += $(COMMON)/os_auto_flush_none.c
+SOURCE += $(PMEM2)/pmem2_utils_other.c
 else
 SOURCE += $(COMMON)/os_auto_flush_none.c
+SOURCE += $(PMEM2)/pmem2_utils_other.c
 endif

@@ -87,12 +87,16 @@ class _TestCase(type):
     def __init__(cls, name, bases, dct):
         type.__init__(cls, name, bases, dct)
 
-        # only classes deriving from BaseTest are meant to be used
-        if cls.__base__.__name__ != 'BaseTest':
-            return
-
         # globally register class as test case
-        builtins.testcases.append(cls)
+        # only classes whose names start with 'TEST' are meant to be run
+        if cls.__name__.startswith('TEST'):
+            builtins.testcases.append(cls)
+            try:
+                cls.testnum = int(cls.__name__.replace('TEST', ''))
+            except ValueError as e:
+                print('Invalid test class name {}, should be "TEST[number]"'
+                      .format(cls.name))
+                raise e
 
         # expand values of context classes attributes
         for attr, _ in CTX_COMPONENTS:
@@ -103,12 +107,6 @@ class _TestCase(type):
                 setattr(cls, attr, val)
 
         cls.name = cls.__name__
-        try:
-            cls.testnum = int(cls.__name__.replace('TEST', ''))
-        except ValueError as e:
-            print('Invalid test class name {}, should be "TEST[number]"'
-                  .format(cls.__name__))
-            raise e
 
 
 class BaseTest(metaclass=_TestCase):
@@ -172,10 +170,19 @@ class BaseTest(metaclass=_TestCase):
             return
 
         if self.config.force_enable:
-            if self.config.force_enable not in vg.disabled_tools(self):
-                vg_tool = self.config.force_enable
+            if vg_tool and vg_tool != self.config.force_enable:
+                raise futils.Skip(
+                    "{}: SKIP: test enables the '{}' Valgrind tool while "
+                    "execution configuration forces '{}'"
+                    .format(self, vg_tool, self.config.force_enable))
+
+            elif self.config.force_enable in vg.disabled_tools(self):
+                raise futils.Skip(
+                      "{}: SKIP: forced Valgrind tool '{}' is disabled by test"
+                      .format(self, self.config.force_enable))
+
             else:
-                vg_tool = None
+                vg_tool = self.config.force_enable
 
         self.valgrind = vg.Valgrind(vg_tool, self.cwd, self.testnum)
 

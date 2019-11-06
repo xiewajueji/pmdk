@@ -177,7 +177,6 @@ tx3_worker(void *arg)
 	return NULL;
 }
 
-
 static void *
 alloc_free_worker(void *arg)
 {
@@ -309,15 +308,26 @@ action_mix_worker(void *arg)
 				pmemobj_cancel(a->pop, &act->pact, 1);
 			os_mutex_unlock(&act->lock);
 		}
+		pmemobj_persist(a->pop, act, sizeof(*act));
 	}
 
 	return NULL;
 }
 
 static void
-actions_clear(struct root *r)
+actions_clear(PMEMobjpool *pop, struct root *r)
 {
-	memset(r->actions, 0, sizeof(r->actions));
+	for (unsigned i = 0; i < Threads; ++i) {
+		for (unsigned j = 0; j < Ops_per_thread; ++j) {
+			struct action *a = &r->actions[i][j];
+			os_mutex_destroy(&a->lock);
+			os_mutex_init(&a->lock);
+			os_cond_destroy(&a->cond);
+			os_cond_init(&a->cond);
+			memset(&a->pact, 0, sizeof(a->pact));
+			pmemobj_persist(pop, a, sizeof(*a));
+		}
+	}
 }
 
 static void
@@ -391,9 +401,9 @@ main(int argc, char *argv[])
 	run_worker(mix_worker, args);
 	run_worker(alloc_free_worker, args);
 	run_worker(action_cancel_worker, args);
-	actions_clear(r);
+	actions_clear(pop, r);
 	run_worker(action_publish_worker, args);
-	actions_clear(r);
+	actions_clear(pop, r);
 	run_worker(action_mix_worker, args);
 
 	/*

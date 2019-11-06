@@ -117,14 +117,12 @@ do
 	esac
 done
 
-
 # check for mandatory arguments
 if [ -z "$PACKAGE_VERSION_TAG" -o -z "$SOURCE" -o -z "$WORKING_DIR" -o -z "$OUT_DIR" ]
 then
 	error "Mandatory arguments missing"
 	usage
 fi
-
 
 PREFIX=usr
 LIB_DIR=$PREFIX/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)
@@ -288,7 +286,6 @@ Description: daxio utility
 EOF
 }
 
-
 if [ "${BUILD_PACKAGE_CHECK}" == "y" ]
 then
 CHECK_CMD="
@@ -356,6 +353,23 @@ Priority: optional
 Standards-version: 4.1.4
 Build-Depends: debhelper (>= 9)
 Homepage: http://pmem.io/pmdk/
+
+Package: libpmem2
+Architecture: any
+Depends: \${shlibs:Depends}, \${misc:Depends}
+Description: Persistent Memory low level support library
+ libpmem2 provides low level persistent memory support. In particular, support
+ for the persistent memory instructions for flushing changes to pmem is
+ provided. (EXPERIMENTAL)
+
+Package: libpmem2-dev
+Section: libdevel
+Architecture: any
+Depends: libpmem2 (=\${binary:Version}), \${shlibs:Depends}, \${misc:Depends}
+Description: Development files for libpmem2
+ libpmem2 provides low level persistent memory support. In particular, support
+ for the persistent memory instructions for flushing changes to pmem is
+ provided. (EXPERIMENTAL)
 
 Package: libpmem
 Architecture: any
@@ -446,56 +460,11 @@ Description: Development files for libpmempool
  This package contains libraries and header files used for linking programs
  against libpmempool.
 
-Package: libvmem
-Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends}
-Description: Persistent Memory volatile memory support library
- The libvmem library turns a pool of persistent memory into a volatile memory
- pool, similar to the system heap but kept separate and with its own
- malloc-style API.
- .
- libvmem supports the traditional malloc/free interfaces on a memory mapped
- file. This allows the use of persistent memory as volatile memory, for cases
- where the pool of persistent memory is useful to an application, but when the
- application doesn’t need it to be persistent.
-
-Package: libvmem-dev
-Section: libdevel
-Architecture: any
-Depends: libvmem (=\${binary:Version}), \${shlibs:Depends}, \${misc:Depends}
-Description: Development files for libvmem
- The libvmem library turns a pool of persistent memory into a volatile memory
- pool, similar to the system heap but kept separate and with its own
- malloc-style API.
- .
- This package contains libraries and header files used for linking programs
- against libvmem.
-
-Package: libvmmalloc
-Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends}
-Description: Persistent Memory dynamic allocation support library
- The libvmmalloc library transparently converts all the dynamic memory
- allocations into persistent memory allocations. This allows the use of
- persistent memory as volatile memory without modifying the target
- application.
-
-Package: libvmmalloc-dev
-Section: libdevel
-Architecture: any
-Depends: libvmmalloc (=\${binary:Version}), \${shlibs:Depends}, \${misc:Depends}
-Description: Development files for libvmmalloc
- The libvmmalloc library transparently converts all the dynamic memory
- allocations into persistent memory allocations.
- .
- This package contains libraries and header files used for linking programs
- against libvmalloc.
-
 Package: $PACKAGE_NAME-dbg
 Section: debug
 Priority: optional
 Architecture: any
-Depends: libvmem (=\${binary:Version}), libvmmalloc (=\${binary:Version}), libpmem (=\${binary:Version}), libpmemblk (=\${binary:Version}), libpmemlog (=\${binary:Version}), libpmemobj (=\${binary:Version}), libpmempool (=\${binary:Version}), \${misc:Depends}
+Depends: libpmem (=\${binary:Version}), libpmemblk (=\${binary:Version}), libpmemlog (=\${binary:Version}), libpmemobj (=\${binary:Version}), libpmempool (=\${binary:Version}), \${misc:Depends}
 Description: Debug symbols for PMDK libraries
  Debug symbols for all PMDK libraries.
 
@@ -764,77 +733,6 @@ hardening-no-fortify-functions $LIB_DIR/pmdk_dbg/*
 libpmempool-dev: package-has-unnecessary-activation-of-ldconfig-trigger
 EOF
 
-cat << EOF > debian/libvmem.install
-$LIB_DIR/libvmem.so.*
-EOF
-
-cat << EOF > debian/libvmem.lintian-overrides
-$ITP_BUG_EXCUSE
-new-package-should-close-itp-bug
-libvmem: package-name-doesnt-match-sonames
-EOF
-
-cat << EOF > debian/libvmem-dev.install
-$LIB_DIR/pmdk_debug/libvmem.a $LIB_DIR/pmdk_dbg/
-$LIB_DIR/pmdk_debug/libvmem.so	$LIB_DIR/pmdk_dbg/
-$LIB_DIR/pmdk_debug/libvmem.so.* $LIB_DIR/pmdk_dbg/
-$LIB_DIR/libvmem.so
-$LIB_DIR/pkgconfig/libvmem.pc
-$INC_DIR/libvmem.h
-$MAN7_DIR/libvmem.7
-$MAN3_DIR/vmem_*.3
-EOF
-
-cat << EOF > debian/libvmem-dev.lintian-overrides
-$ITP_BUG_EXCUSE
-new-package-should-close-itp-bug
-# The following warnings are triggered by a bug in debhelper:
-# http://bugs.debian.org/204975
-postinst-has-useless-call-to-ldconfig
-postrm-has-useless-call-to-ldconfig
-# We do not want to compile with -O2 for debug version
-hardening-no-fortify-functions $LIB_DIR/pmdk_dbg/*
-# pmdk provides second set of libraries for debugging.
-# These are in /usr/lib/$arch/pmdk_dbg/, but still trigger ldconfig.
-# Related issue: https://github.com/pmem/issues/issues/841
-libvmem-dev: package-has-unnecessary-activation-of-ldconfig-trigger
-EOF
-
-cat << EOF > debian/libvmmalloc.install
-$LIB_DIR/libvmmalloc.so.*
-EOF
-
-cat << EOF > debian/libvmmalloc.lintian-overrides
-$ITP_BUG_EXCUSE
-new-package-should-close-itp-bug
-libvmmalloc: package-name-doesnt-match-sonames
-EOF
-
-cat << EOF > debian/libvmmalloc-dev.install
-$LIB_DIR/pmdk_debug/libvmmalloc.a   $LIB_DIR/pmdk_dbg/
-$LIB_DIR/pmdk_debug/libvmmalloc.so   $LIB_DIR/pmdk_dbg/
-$LIB_DIR/pmdk_debug/libvmmalloc.so.* $LIB_DIR/pmdk_dbg/
-$LIB_DIR/libvmmalloc.so
-$LIB_DIR/pkgconfig/libvmmalloc.pc
-$INC_DIR/libvmmalloc.h
-$MAN7_DIR/libvmmalloc.7
-EOF
-
-cat << EOF > debian/libvmmalloc-dev.lintian-overrides
-$ITP_BUG_EXCUSE
-new-package-should-close-itp-bug
-# The following warnings are triggered by a bug in debhelper:
-# http://bugs.debian.org/204975
-postinst-has-useless-call-to-ldconfig
-postrm-has-useless-call-to-ldconfig
-# We do not want to compile with -O2 for debug version
-hardening-no-fortify-functions $LIB_DIR/pmdk_dbg/*
-# pmdk provides second set of libraries for debugging.
-# These are in /usr/lib/$arch/pmdk_dbg/, but still trigger ldconfig.
-# Related issue: https://github.com/pmem/issues/issues/841
-libvmmalloc-dev: package-has-unnecessary-activation-of-ldconfig-trigger
-EOF
-
 cat << EOF > debian/$PACKAGE_NAME-dbg.lintian-overrides
 $ITP_BUG_EXCUSE
 new-package-should-close-itp-bug
@@ -876,7 +774,6 @@ then
 	append_daxio_control;
 	daxio_install_triggers_overrides;
 fi
-
 
 # Convert ChangeLog to debian format
 CHANGELOG_TMP=changelog.tmp

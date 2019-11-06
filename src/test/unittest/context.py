@@ -158,8 +158,9 @@ class Context(ContextBase):
         """Create a new file with the selected size and name"""
         filepath = os.path.join(self.testdir, path)
         with open(filepath, 'w') as f:
-            f.seek(size - 1)
-            f.write('\0')
+            if size > 0:
+                f.seek(size - 1)
+                f.write('\0')
         if mode is not None:
             os.chmod(filepath, mode)
         return filepath
@@ -224,9 +225,17 @@ class Context(ContextBase):
             cmd = '{} {}'.format(self.valgrind.cmd, cmd)
 
         cmd = '{} {}'.format(cmd, cmd_args)
-        proc = sp.run(cmd, env=env, cwd=self.test.cwd, shell=True,
-                      timeout=self.conf.timeout, stdout=sp.PIPE,
-                      stderr=sp.STDOUT, universal_newlines=True)
+
+        if self.conf.tracer:
+            cmd = '{} {}'.format(self.conf.tracer, cmd)
+
+            # process stdout and stderr are not redirected - this lets running
+            # tracer command in interactive session
+            proc = sp.run(cmd, env=env, cwd=self.test.cwd, shell=True)
+        else:
+            proc = sp.run(cmd, env=env, cwd=self.test.cwd, shell=True,
+                          timeout=self.conf.timeout, stdout=sp.PIPE,
+                          stderr=sp.STDOUT, universal_newlines=True)
 
         if proc.returncode != expected_exit:
             futils.fail(proc.stdout, exit_code=proc.returncode)
@@ -266,6 +275,9 @@ class _CtxType(type):
         setattr(cls, '__repr__', lambda cls: cls.__class__.__name__.lower())
 
     def __repr__(cls):
+        return cls.__name__.lower()
+
+    def __str__(cls):
         return cls.__name__.lower()
 
     def __iter__(cls):

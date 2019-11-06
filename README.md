@@ -4,7 +4,7 @@
 [![Build status](https://ci.appveyor.com/api/projects/status/u2l1db7ucl5ktq10/branch/master?svg=true&pr=false)](https://ci.appveyor.com/project/pmem/pmdk/branch/master)
 [![Build status](https://api.cirrus-ci.com/github/pmem/pmdk.svg)](https://cirrus-ci.com/github/pmem/pmdk/master)
 [![Coverity Scan Build Status](https://img.shields.io/coverity/scan/3015.svg)](https://scan.coverity.com/projects/pmem-pmdk)
-[![PMDK release version](https://img.shields.io/github/release/pmem/pmdk.svg)](https://github.com/pmem/pmdk/releases/latest)
+[![PMDK release version](https://img.shields.io/github/release/pmem/pmdk.svg?sort=semver)](https://github.com/pmem/pmdk/releases/latest)
 [![Coverage Status](https://codecov.io/github/pmem/pmdk/coverage.svg?branch=master)](https://codecov.io/gh/pmem/pmdk/branch/master)
 
 The **Persistent Memory Development Kit (PMDK)** is a collection of libraries and tools for System Administrators and Application Developers to simplify managing and accessing persistent memory devices. For more information, see http://pmem.io.
@@ -43,13 +43,12 @@ Available Libraries:
 
 - [libpmemlog](http://pmem.io/pmdk/libpmemlog/):  provides a pmem-resident log file.
 
-- [libvmem](http://pmem.io/pmdk/libvmem/):  turns a pool of persistent memory into a volatile memory pool, similar to the system heap but kept separate and with its own malloc-style API.
-
-- [libvmmalloc](http://pmem.io/pmdk/libvmmalloc/)<sup>1</sup>:  transparently converts all the dynamic memory allocations into persistent memory allocations.
-
 - [libpmempool](http://pmem.io/pmdk/libpmempool/):  provides support for off-line pool management and diagnostics.
 
 - [librpmem](http://pmem.io/pmdk/librpmem/)<sup>1</sup>:  provides low-level support for remote access to persistent memory utilizing RDMA-capable RNICs.
+
+If you're looking for *libvmem* and *libvmmalloc*, they have been moved to a
+[separate repository](https://github.com/pmem/vmem).
 
 Available Utilities:
 
@@ -75,9 +74,7 @@ Getting Started with Persistent Memory Programming is a tutorial series created 
 - Part 4: [Thinking Transactionally](https://software.intel.com/en-us/videos/thinking-transactionally-persistent-memory-programming-series)
 - Part 5: [A C++ Example](https://software.intel.com/en-us/videos/a-c-example-persistent-memory-programming-series)
 
-
 Additionally, we recommend reading [Introduction to Programming with Persistent Memory from Intel](https://software.intel.com/en-us/articles/introduction-to-programming-with-persistent-memory-from-intel)
-
 
 ## Version Conventions
 
@@ -122,15 +119,20 @@ You will need to install the following required packages on the build system:
 
 * **autoconf**
 * **pkg-config**
-* **libndctl-devel** (v60.1 or later)<sup>1</sup>
-* **libdaxctl-devel** (v60.1 or later)
+* **libndctl-devel** (v63 or later)<sup>1</sup>
+* **libdaxctl-devel** (v63 or later)
 
 The following packages are required only by selected PMDK components
 or features:
 
 * **libfabric** (v1.4.2 or later) -- required by **librpmem**
 
-><sup>1</sup> PMDK requires libndctl v63 or newer (to enable RAS features) by default. If you have such libndctl version but you don't want to depend on this API please build PMDK with NDCTL_USE_V63_API=n. For more information please check this issue pmem/issues#1039
+><sup>1</sup> PMDK depends on libndctl to support RAS features. It is possible
+to disable this support by passing NDCTL_ENABLE=n to "make", but we strongly
+discourage users from doing that. Disabling NDCTL strips PMDK from ability to
+detect hardware failures, which may lead to silent data corruption.
+For information how to disable RAS at runtime for kernels prior to 5.0.4 please
+see https://github.com/pmem/issues/issues/1039.
 
 ### Windows
 
@@ -153,7 +155,6 @@ or features:
 
 ><sup>4</sup> The pkg version of ncurses is required for proper operation; the base version included in FreeBSD is not sufficient.
 
-
 ## Building PMDK on Linux or FreeBSD
 
 To build from source, clone this tree:
@@ -164,7 +165,7 @@ To build from source, clone this tree:
 
 For a stable version, checkout a [release tag](https://github.com/pmem/pmdk/releases) as follows. Otherwise skip this step to build the latest development release.
 ```
-	$ git checkout tags/1.6
+	$ git checkout tags/1.7
 ```
 
 Once the build system is setup, the Persistent Memory Development Kit is built using the `make` command at the top level:
@@ -203,7 +204,6 @@ For example:
 ```
 Once make completes, all the libraries and examples are built. You can play with the library within the build tree, or install it locally on your machine. For information about running different types of tests, please refer to the [src/test/README](src/test/README).
 
-
 **Installing the library** is convenient since it installs man pages and libraries in the standard system locations:
 ```
 	(as root...)
@@ -228,7 +228,6 @@ This will install files to /tmp/usr/lib, /tmp/usr/include /tmp/usr/share/man.
 ```
 This call requires the following dependencies: **pandoc**. Pandoc is provided by the hs-pandoc package on FreeBSD.
 
-
 **Install copy of source tree** can be done by specifying the path where you want it installed.
 ```
 	$ make source DESTDIR=some_path
@@ -245,7 +244,6 @@ To build rpm packages without running tests:
 	$ make BUILD_PACKAGE_CHECK=n rpm
 ```
 This requires **rpmbuild** to be installed.
-
 
 **Build dpkg packages** on Debian-based distributions is done by:
 ```
@@ -297,8 +295,6 @@ and UndefinedBehaviorSanitizer, run:
 ```
 	$ make SANITIZE=address,undefined clobber check
 ```
-
-The address sanitizer is not supported for libvmmalloc on FreeBSD and will be ignored.
 
 ## Building PMDK on Windows
 

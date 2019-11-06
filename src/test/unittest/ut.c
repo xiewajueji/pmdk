@@ -77,8 +77,16 @@ ut_strerror(int errnum, char *buff, size_t bufflen)
 }
 void ut_suppress_errmsg(void) {}
 void ut_unsuppress_errmsg(void) {}
+void ut_suppress_crt_assert(void) {}
+void ut_unsuppress_crt_assert(void) {}
 #else
+#include <crtdbg.h>
+
 #pragma comment(lib, "rpcrt4.lib")
+
+static DWORD ErrMode;
+static BOOL Err_suppressed = FALSE;
+static UINT AbortBehave;
 
 void
 ut_suppress_errmsg(void)
@@ -88,17 +96,54 @@ ut_suppress_errmsg(void)
 		SEM_FAILCRITICALERRORS);
 	AbortBehave = _set_abort_behavior(0, _WRITE_ABORT_MSG |
 		_CALL_REPORTFAULT);
-	Suppressed = TRUE;
+	Err_suppressed = TRUE;
 }
 
 void
 ut_unsuppress_errmsg(void)
 {
-	if (Suppressed) {
+	if (Err_suppressed) {
 		SetErrorMode(ErrMode);
 		_set_abort_behavior(AbortBehave, _WRITE_ABORT_MSG |
 			_CALL_REPORTFAULT);
-		Suppressed = FALSE;
+		Err_suppressed = FALSE;
+	}
+}
+
+static _invalid_parameter_handler OldHandler;
+static BOOL Crt_suppressed = FALSE;
+static int Old_crt_assert_mode;
+
+/*
+ * empty_parameter_handler -- empty, non aborting invalid parameter handler
+ */
+static void
+empty_parameter_handler(const wchar_t *expression, const wchar_t *function,
+	const wchar_t *file, unsigned line, uintptr_t pReserved)
+{
+}
+
+/*
+ * ut_suppress_crt_assert -- suppress crt raport message box
+ */
+void
+ut_suppress_crt_assert(void)
+{
+	OldHandler = _set_invalid_parameter_handler(empty_parameter_handler);
+	Old_crt_assert_mode = _CrtSetReportMode(_CRT_ASSERT, 0);
+	Crt_suppressed = TRUE;
+}
+
+/*
+ * ut_suppress_crt_assert -- unsuppress crt raport message box
+ */
+void
+ut_unsuppress_crt_assert(void)
+{
+	if (Crt_suppressed) {
+		_set_invalid_parameter_handler(OldHandler);
+		_CrtSetReportMode(_CRT_ASSERT, Old_crt_assert_mode);
+		Crt_suppressed = FALSE;
 	}
 }
 
@@ -196,7 +241,7 @@ static int Force_quiet;		/* set by UNITTEST_FORCE_QUIET env variable */
 static char *Testname;		/* set by UNITTEST_NAME env variable */
 
 /* set by UNITTEST_CHECK_OPEN_FILES_IGNORE_BADBLOCKS env variable */
-static const char *Ignore_bb;
+static int Ignore_bb;
 
 unsigned long Ut_pagesize;
 unsigned long long Ut_mmap_align;
@@ -759,7 +804,11 @@ ut_start_common(const char *file, int line, const char *func,
 	os_mutex_init(&Sigactions_lock);
 #else
 	Ut_mmap_align = Ut_pagesize;
-	Ignore_bb = os_getenv("UNITTEST_CHECK_OPEN_FILES_IGNORE_BADBLOCKS");
+	char *ignore_bb =
+		os_getenv("UNITTEST_CHECK_OPEN_FILES_IGNORE_BADBLOCKS");
+
+	if (ignore_bb && *ignore_bb)
+		Ignore_bb = 1;
 #endif
 	if (os_getenv("UNITTEST_NO_SIGHANDLERS") == NULL)
 		ut_register_sighandlers();
@@ -813,7 +862,15 @@ ut_start_common(const char *file, int line, const char *func,
 	prefix(file, line, func, 0);
 	vout(OF_NAME, "START", fmt, ap);
 
-#ifdef __FreeBSD__
+#ifdef _WIN32
+	/*
+	 * XXX To generate error string Windows will silently load
+	 * KernelBase.dll.mui. To prevent counting it as an opened file, it is
+	 * loaded here by force.
+	 */
+	char buff[1000];
+	util_strwinerror(1, buff, 1000);
+#elif __FreeBSD__
 	/* XXX Record the fd that will be leaked by uuid_generate */
 	uuid_t u;
 	uuid_generate(u);
@@ -1037,7 +1094,6 @@ ut_toUTF16(const char *wstr)
 	return str;
 }
 #endif
-
 
 /*
  * ut_strtoi -- a strtoi call that cannot return error

@@ -72,6 +72,7 @@ OBJ_TESTS = \
 	\
 	obj_action\
 	obj_alloc\
+	obj_badblock\
 	obj_bucket\
 	obj_check\
 	obj_constructor\
@@ -142,6 +143,7 @@ OBJ_TESTS = \
 	obj_tx_mt\
 	obj_tx_realloc\
 	obj_tx_strdup\
+	obj_ulog_size\
 	obj_zones
 
 OBJ_REMOTE_DEPS = \
@@ -218,6 +220,12 @@ PMEM_TESTS = \
 	pmem_valgr_simple\
 	pmem_unmap
 
+PMEM2_TESTS = \
+	pmem2_config\
+	pmem2_config_get_file_size\
+	pmem2_map\
+	pmem2_include
+
 PMEMPOOL_TESTS = \
 	pmempool_check\
 	pmempool_create\
@@ -243,48 +251,6 @@ RPMEM_TESTS = \
 	rpmemd_log\
 	rpmemd_obc\
 	rpmemd_util
-
-VMEM_TESTS = \
-	vmem_aligned_alloc\
-	vmem_calloc\
-	vmem_check_allocations\
-	vmem_check_version\
-	vmem_check\
-	vmem_create\
-	vmem_create_error\
-	vmem_create_in_region\
-	vmem_custom_alloc\
-	vmem_malloc\
-	vmem_malloc_usable_size\
-	vmem_mix_allocations\
-	vmem_multiple_pools\
-	vmem_out_of_memory\
-	vmem_pages_purging\
-	vmem_realloc\
-	vmem_realloc_inplace\
-	vmem_stats\
-	vmem_strdup\
-	vmem_valgrind\
-	vmem_valgrind_region
-
-VMMALLOC_DUMMY_FUNCS_DEPS = \
-	vmmalloc_dummy_funcs
-
-VMMALLOC_DUMMY_FUNCS_TESTS = \
-	vmmalloc_malloc_hooks\
-	vmmalloc_memalign\
-	vmmalloc_valloc
-
-VMMALLOC_TESTS = \
-	vmmalloc_calloc\
-	vmmalloc_check_allocations\
-	vmmalloc_fork\
-	vmmalloc_init\
-	vmmalloc_malloc\
-	vmmalloc_malloc_usable_size\
-	vmmalloc_out_of_memory\
-	vmmalloc_realloc\
-	vmmalloc_valgrind
 
 EXAMPLES_TESTS = \
 	ex_libpmem\
@@ -331,11 +297,8 @@ LOCAL_TESTS = \
 	$(LOG_TESTS)\
 	$(OTHER_TESTS)\
 	$(PMEM_TESTS)\
+	$(PMEM2_TESTS)\
 	$(PMEMPOOL_TESTS)\
-	$(VMEM_TESTS)\
-	$(VMMALLOC_DUMMY_FUNCS_TESTS)\
-	$(VMMALLOC_TESTS)\
-	$(EXAMPLES_TESTS)\
 	$(LIBPMEMPOOL_TESTS)\
 	$(LIBPMEMPOOL_MOD_TESTS)\
 	$(DAXIO_TESTS)\
@@ -344,7 +307,6 @@ LOCAL_TESTS = \
 REMOTE_TESTS = \
 	$(OBJ_REMOTE_TESTS)\
 	$(RPMEM_TESTS)\
-	$(RPMEM_EXAMPLES_TESTS)\
 	libpmempool_rm_remote\
 	remote_basic\
 	remote_obj_basic\
@@ -354,6 +316,11 @@ REMOTE_TESTS = \
 	pmempool_sync_remote\
 	pmempool_transform_remote
 
+ifneq ($(BUILD_EXAMPLES),n)
+	LOCAL_TESTS += $(EXAMPLES_TESTS)
+	REMOTE_TESTS += $(RPMEM_EXAMPLES_TESTS)
+endif
+
 TESTS = \
 	$(LOCAL_TESTS)\
 	$(REMOTE_TESTS)
@@ -361,7 +328,6 @@ TESTS = \
 TESTS_BUILD = \
 	$(TEST_DEPS)\
 	$(OBJ_DEPS)\
-	$(VMMALLOC_DUMMY_FUNCS_DEPS)\
 	$(LIBPMEMPOOL_DEPS)\
 	$(LIBPMEMPOOL_MOD_DEPS)\
 	$(TESTS)
@@ -393,13 +359,12 @@ clean clobber: $(TESTS_BUILD)
 	$(RM) $(FILE_MAX_DAX_DEVICES)
 	$(RM) envconfig.sh envconfig.py
 
-$(TESTS) $(OBJ_DEPS) $(LIBPMEMPOOL_DEPS) $(LIBPMEMPOOL_MOD_DEPS) $(VMMALLOC_DUMMY_FUNCS_DEPS): $(TEST_DEPS)
+$(TESTS) $(OBJ_DEPS) $(LIBPMEMPOOL_DEPS) $(LIBPMEMPOOL_MOD_DEPS): $(TEST_DEPS)
 
 $(OBJ_TESTS): $(OBJ_DEPS)
 $(OBJ_REMOTE_TESTS): $(OBJ_REMOTE_DEPS)
 $(LIBPMEMPOOL_TESTS): $(LIBPMEMPOOL_DEPS)
 $(LIBPMEMPOOL_MOD_TESTS): $(LIBPMEMPOOL_MOD_DEPS)
-$(VMMALLOC_DUMMY_FUNCS_TESTS): $(VMMALLOC_DUMMY_FUNCS_DEPS)
 
 $(TESTS_BUILD):
 	$(MAKE) -C $@ $(TARGET)
@@ -472,6 +437,10 @@ pcheck-pmem: TARGET = pcheck
 pcheck-pmem: $(PMEM_TESTS)
 	@echo "No failures."
 
+pcheck-pmem2: TARGET = pcheck
+pcheck-pmem2: $(PMEM2_TESTS)
+	@echo "No failures."
+
 pcheck-rpmem: TARGET = pcheck
 pcheck-rpmem: $(RPMEM_TESTS)
 	@echo "No failures."
@@ -482,14 +451,6 @@ pcheck-pmempool: $(PMEMPOOL_TESTS)
 
 pcheck-libpmempool: TARGET = pcheck
 pcheck-libpmempool: $(LIBPMEMPOOL_TESTS)
-	@echo "No failures."
-
-pcheck-vmem: TARGET = pcheck
-pcheck-vmem: $(VMEM_TESTS)
-	@echo "No failures."
-
-pcheck-vmmalloc: TARGET = pcheck
-pcheck-vmmalloc: $(VMMALLOC_TESTS)
 	@echo "No failures."
 
 pcheck-local-quiet: TARGET = pcheck
@@ -529,7 +490,7 @@ ifneq ($(SKIP_SYNC_REMOTES),y)
 endif
 
 .PHONY: all check clean clobber cstyle pcheck pcheck-blk pcheck-log pcheck-obj\
-	 pcheck-other pcheck-pmem pcheck-pmempool pcheck-vmem pcheck-vmmalloc\
+	 pcheck-other pcheck-pmem pcheck-pmempool\
 	 test unittest tools check-remote format pcheck-libpmempool pycheck\
 	 pcheck-rpmem pcheck-local pcheck-remote sync-remotes $(TESTS_BUILD)\
 	 require-rpmem check-remote-quiet check-remote-quiet-conditional

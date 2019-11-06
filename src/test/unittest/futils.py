@@ -55,7 +55,7 @@ else:
 
 def get_tool_path(ctx, name):
     if sys.platform == 'win32':
-        if ctx.build == 'debug':
+        if str(ctx.build) == 'debug':
             return abspath(join(WIN_DEBUG_BUILDDIR, 'libs', name + '.exe'))
         else:
             return abspath(join(WIN_RELEASE_BUILDDIR, 'libs', name + '.exe'))
@@ -65,12 +65,19 @@ def get_tool_path(ctx, name):
 
 def get_test_tool_path(ctx, name):
     if sys.platform == 'win32':
-        if ctx.build == 'debug':
+        if str(ctx.build) == 'debug':
             return abspath(join(WIN_DEBUG_BUILDDIR, 'tests', name + '.exe'))
         else:
             return abspath(join(WIN_RELEASE_BUILDDIR, 'tests', name + '.exe'))
     else:
         return abspath(join(ROOTDIR, 'tools', name, name))
+
+
+def get_lib_dir(ctx):
+    if str(ctx.build) == 'debug':
+        return DEBUG_LIBDIR
+    else:
+        return RELEASE_LIBDIR
 
 
 class Color:
@@ -126,9 +133,13 @@ def run_tests_common(testcases, config):
         sys.exit('No testcases to run found for selected configuration.')
 
     for t in testcases:
-        t = t(config)
-        if t.enabled and t._execute():  # if test failed
-            return 1
+        try:
+            t = t(config)
+        except Skip as s:
+            print(s)
+        else:
+            if t.enabled and t._execute():  # if test failed
+                return 1
     return 0
 
 
