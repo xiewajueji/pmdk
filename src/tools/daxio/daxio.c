@@ -1,5 +1,5 @@
 /*
- * Copyright 2018, Intel Corporation
+ * Copyright 2018-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -54,6 +54,7 @@
 #include <libpmem.h>
 
 #include "util.h"
+#include "os.h"
 #include "os_dimm.h"
 
 #define ALIGN_UP(size, align) (((size) + (align) - 1) & ~((align) - 1))
@@ -352,14 +353,14 @@ setup_device(struct ndctl_ctx *ndctl_ctx, struct daxio_device *dev, int is_dst,
 	}
 
 	/* try to open file/device (if exists) */
-	dev->fd = open(dev->path, flags, S_IRUSR|S_IWUSR);
+	dev->fd = os_open(dev->path, flags, S_IRUSR|S_IWUSR);
 	if (dev->fd == -1) {
 		ret = errno;
 		if (ret == ENOENT && is_dst) {
 			/* file does not exist - create it */
 			flags = O_CREAT|O_WRONLY|O_TRUNC;
 			dev->size = SIZE_MAX;
-			dev->fd = open(dev->path, flags, S_IRUSR|S_IWUSR);
+			dev->fd = os_open(dev->path, flags, S_IRUSR|S_IWUSR);
 			if (dev->fd == -1) {
 				FAIL("open");
 				return -1;
@@ -479,7 +480,7 @@ adjust_io_len(struct daxio_context *ctx)
 	if (ctx->dst.is_devdax)
 		max_len = max_len < dst_len ? max_len : dst_len;
 
-	/* if length is specified and is not bigger than mmaped region */
+	/* if length is specified and is not bigger than mmapped region */
 	if (ctx->len != SIZE_MAX && ctx->len <= max_len)
 		return;
 

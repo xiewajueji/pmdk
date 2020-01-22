@@ -37,6 +37,7 @@ import subprocess as sp
 from enum import Enum, unique
 from os import path
 
+import context as ctx
 import futils
 
 
@@ -69,6 +70,9 @@ class _Tool(Enum):
     def __str__(self):
         return self.name.lower()
 
+    def __bool__(self):
+        return self != self.NONE
+
 
 TOOLS = tuple(t for t in _Tool if t != _Tool.NONE)
 
@@ -100,7 +104,7 @@ def disabled_tools(test):
 class Valgrind:
     """Valgrind management"""
 
-    def __init__(self, tool, cwd, testnum, memcheck_check_leaks=True):
+    def __init__(self, tool, cwd, testnum):
         if sys.platform == 'win32':
             raise NotImplementedError(
                 'Valgrind class should not be used on Windows')
@@ -112,7 +116,7 @@ class Valgrind:
         log_file_name = '{}{}.log'.format(self.tool.name.lower(), testnum)
         self.log_file = path.join(cwd, log_file_name)
 
-        if tool is None:
+        if self.tool == NONE:
             self.valgrind_exe = None
         else:
             self.valgrind_exe = self._get_valgrind_exe()
@@ -120,8 +124,9 @@ class Valgrind:
         if self.valgrind_exe is None:
             return
 
-        self.opts = ''
-        self.memcheck_check_leaks = memcheck_check_leaks
+        self.verify()
+
+        self.opts = []
 
         self.add_suppression('ld.supp')
 
@@ -132,8 +137,6 @@ class Valgrind:
             self.add_suppression('memcheck-libunwind.supp')
             self.add_suppression('memcheck-ndctl.supp')
             self.add_suppression('memcheck-dlopen.supp')
-            if memcheck_check_leaks:
-                self.add_opt('--leak-check=full')
 
         # Before Skylake, Intel CPUs did not have clflushopt instruction, so
         # pmem_flush and pmem_persist both translated to clflush.
@@ -158,13 +161,48 @@ class Valgrind:
     def __bool__(self):
         return self.tool != NONE
 
+    @classmethod
+    def filter(cls, config, msg, tc):
+        """
+        Acquire valgrind tool for the test to be run based on configuration
+        and test requirements
+        """
+        vg_tool, kwargs = ctx.get_requirement(tc, 'enabled_valgrind', NONE)
+        disabled = ctx.get_requirement(tc, 'disabled_valgrind', NONE)
+
+        if config.force_enable:
+            if vg_tool and vg_tool != config.force_enable:
+                raise futils.Skip(
+                    "test enables the '{}' Valgrind tool while "
+                    "execution configuration forces '{}'"
+                    .format(vg_tool, config.force_enable))
+
+            elif config.force_enable in disabled:
+                raise futils.Skip(
+                      "forced Valgrind tool '{}' is disabled by test"
+                      .format(config.force_enable))
+
+            else:
+                vg_tool = config.force_enable
+
+        return [cls(vg_tool, tc.cwd, tc.testnum, **kwargs), ]
+
     @property
     def cmd(self):
         """Get Valgrind command with specified arguments"""
         if self.tool == NONE:
-            return ''
-        return '{} --tool={} --log-file={} {} '.format(
-            self.valgrind_exe, self.tool_name, self.log_file, self.opts)
+            return []
+
+        cmd = [self.valgrind_exe, '--tool={}'.format(self.tool_name),
+               '--log-file={}'.format(self.log_file)] + self.opts
+        return cmd
+
+    def setup(self, memcheck_check_leaks=True, **kwargs):
+        if self.tool == MEMCHECK and memcheck_check_leaks:
+            self.add_opt('--leak-check=full')
+
+    def check(self, **kwargs):
+        self.validate_log()
 
     def _get_valgrind_exe(self):
         """
@@ -177,7 +215,7 @@ class Valgrind:
             out = sp.check_output('which valgrind', shell=True,
                                   universal_newlines=True)
         except sp.CalledProcessError:
-            return None
+            raise futils.Skip('Valgrind not found')
 
         valgrind_bin = path.join(path.dirname(out), 'valgrind.bin')
         if path.isfile(valgrind_bin):
@@ -186,7 +224,7 @@ class Valgrind:
 
     def add_opt(self, opt):
         """Add option to Valgrind command"""
-        self.opts = '{} {}'.format(self.opts, opt)
+        self.opts.append(opt)
 
     def _get_version(self):
         """
@@ -203,8 +241,8 @@ class Valgrind:
         Add suppression file. Provided file path is
         relative to tests root directory (pmdk/src/test)
         """
-        self.opts = '{} --suppressions={}'.format(
-            self.opts, path.join(futils.ROOTDIR, f))
+        self.opts.append('--suppressions={}'
+                         .format(path.join(futils.ROOTDIR, f)))
 
     def validate_log(self):
         """
@@ -225,14 +263,12 @@ class Valgrind:
         if path.isfile(self.log_file + '.match'):
             # if there is a Valgrind log match file, do nothing - log file
             # will be checked by 'match' tool
-            return True
+            return
 
         non_zero_errors = 'ERROR SUMMARY: [^0]'
         errors_found = any(re.search(non_zero_errors, l) for l in no_ignored)
         if any('Bad pmempool' in l for l in no_ignored) or errors_found:
-            return False
-
-        return True
+            raise futils.Fail('Valgrind log validation failed')
 
     def verify(self):
         """
@@ -248,3 +284,44 @@ class Valgrind:
         except sp.CalledProcessError:
             raise futils.Skip("Valgrind tool '{}' was not found"
                               .format(self.tool_name))
+
+
+def require_valgrind_enabled(valgrind):
+    def wrapped(tc):
+        if sys.platform == 'win32':
+            # do not run valgrind tests on windows
+            tc.enabled = False
+            return tc
+
+        tool = _require_valgrind_common(valgrind)
+        ctx.add_requirement(tc, 'enabled_valgrind', tool)
+
+        return tc
+
+    return wrapped
+
+
+def require_valgrind_disabled(valgrind):
+    def wrapped(tc):
+        disabled_tools = []
+        if isinstance(valgrind, list):
+            for v in valgrind:
+                disabled_tools.append(_require_valgrind_common(v))
+        else:
+            disabled_tools.append(_require_valgrind_common(valgrind))
+
+        ctx.add_requirement(tc, 'disabled_valgrind', disabled_tools)
+
+        return tc
+
+    return wrapped
+
+
+def _require_valgrind_common(v):
+    valid_tool_names = [str(t) for t in TOOLS]
+    if v not in valid_tool_names:
+        sys.exit('used name {} not in valid valgrind tool names which are: {}'
+                 .format(v, valid_tool_names))
+
+    str_to_tool = next(t for t in TOOLS if v == str(t))
+    return str_to_tool

@@ -1,5 +1,5 @@
 /*
- * Copyright 2019, Intel Corporation
+ * Copyright 2019-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,6 +39,7 @@
 #include "libpmem2.h"
 
 #define INVALID_FD (-1)
+#define PMEM2_GRANULARITY_INVALID ((enum pmem2_granularity) (-1))
 
 struct pmem2_config {
 	/* a source file descriptor / handle for the designed mapping */
@@ -55,6 +56,9 @@ struct pmem2_config {
 	enum pmem2_granularity requested_max_granularity;
 };
 
-void config_init(struct pmem2_config *cfg);
+void pmem2_config_init(struct pmem2_config *cfg);
+
+int pmem2_config_validate_length(const struct pmem2_config *cfg,
+		size_t file_len);
 
 #endif /* PMEM2_CONFIG_H */

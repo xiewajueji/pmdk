@@ -115,6 +115,8 @@ LIBPMEMOBJ_1.0 {
 		pmemobj_tx_log_auto_alloc;
 		pmemobj_tx_log_snapshots_max_size;
 		pmemobj_tx_log_intents_max_size;
+		pmemobj_tx_set_user_data;
+		pmemobj_tx_get_user_data;
 		pmemobj_memcpy;
 		pmemobj_memcpy_persist;
 		pmemobj_memmove;
@@ -135,6 +137,9 @@ LIBPMEMOBJ_1.0 {
 		pmemobj_tx_publish;
 		pmemobj_tx_xpublish;
 		pmemobj_cancel;
+		pmemobj_set_user_data;
+		pmemobj_get_user_data;
+		pmemobj_defrag;
 		_pobj_cached_pool;
 		_pobj_cache_invalidate;
 		_pobj_debug_notice;

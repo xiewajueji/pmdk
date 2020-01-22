@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2019, Intel Corporation
+ * Copyright 2015-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -69,6 +69,8 @@ struct tx {
 	void *stage_callback_arg;
 
 	int first_snapshot;
+
+	void *user_data;
 };
 
 /*
@@ -772,6 +774,8 @@ pmemobj_tx_begin(PMEMobjpool *pop, jmp_buf env, ...)
 		tx->pop = pop;
 
 		tx->first_snapshot = 1;
+
+		tx->user_data = NULL;
 	} else {
 		FATAL("Invalid stage %d to begin new transaction", tx->stage);
 	}
@@ -1346,7 +1350,7 @@ pmemobj_tx_add_common(struct tx *tx, struct tx_range_def *args)
 			 * or	--+++++ (desired snapshot is inside)
 			 *
 			 * Notice that we cannot create a snapshot based solely
-			 * on this information without risking overwritting an
+			 * on this information without risking overwriting an
 			 * existing one. We have to continue iterating, but we
 			 * keep the information about adjacent snapshots in the
 			 * nprev variable.
@@ -2044,6 +2048,38 @@ pmemobj_tx_log_intents_max_size(size_t nintents)
 err_overflow:
 	errno = ERANGE;
 	return SIZE_MAX;
+}
+
+/*
+ * pmemobj_tx_set_user_data -- sets volatile pointer to the user data for the
+ * current transaction
+ */
+void
+pmemobj_tx_set_user_data(void *data)
+{
+	LOG(3, "data %p", data);
+
+	struct tx *tx = get_tx();
+
+	ASSERT_IN_TX(tx);
+
+	tx->user_data = data;
+}
+
+/*
+ * pmemobj_tx_get_user_data -- gets volatile pointer to the user data associated
+ * with the current transaction
+ */
+void *
+pmemobj_tx_get_user_data(void)
+{
+	LOG(3, NULL);
+
+	struct tx *tx = get_tx();
+
+	ASSERT_IN_TX(tx);
+
+	return tx->user_data;
 }
 
 /*

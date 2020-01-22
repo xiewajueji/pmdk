@@ -1,5 +1,5 @@
 #
-# Copyright 2014-2019, Intel Corporation
+# Copyright 2014-2020, Intel Corporation
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -47,6 +47,7 @@ LIBS_DIR=$(TOP)/src
 
 EXAMPLES_DIR=$(TOP)/src/examples
 EX_LIBPMEM=$(EXAMPLES_DIR)/libpmem
+EX_LIBPMEM2=$(EXAMPLES_DIR)/libpmem2
 EX_LIBPMEMBLK=$(EXAMPLES_DIR)/libpmemblk
 EX_LIBPMEMLOG=$(EXAMPLES_DIR)/libpmemlog
 EX_LIBPMEMOBJ=$(EXAMPLES_DIR)/libpmemobj
@@ -158,12 +159,13 @@ OBJS +=\
 	$(TOP)/src/nondebug/libpmem/pmem.o\
 	$(TOP)/src/nondebug/libpmem/pmem_posix.o
 
-include $(TOP)/src/libpmem/$(ARCH)/sources.inc
-OBJS_MEM = $(LIBPMEM_ARCH_SOURCE:.c=.o)
+include $(TOP)/src/libpmem2/$(ARCH)/sources.inc
+OBJS_MEM = $(LIBPMEM2_ARCH_SOURCE:.c=.o)
 OBJS += $(addprefix $(TOP)/src/nondebug/libpmem/, ${OBJS_MEM})
 
 INCS += -I$(TOP)/src/libpmem
-INCS += -I$(TOP)/src/libpmem/$(ARCH)
+INCS += -I$(TOP)/src/libpmem2
+INCS += -I$(TOP)/src/libpmem2/$(ARCH)
 endif
 
 ifeq ($(LIBPMEM), internal-debug)
@@ -173,12 +175,13 @@ OBJS +=\
 	$(TOP)/src/debug/libpmem/pmem.o\
 	$(TOP)/src/debug/libpmem/pmem_posix.o
 
-include $(TOP)/src/libpmem/$(ARCH)/sources.inc
-OBJS_MEM = $(LIBPMEM_ARCH_SOURCE:.c=.o)
+include $(TOP)/src/libpmem2/$(ARCH)/sources.inc
+OBJS_MEM = $(LIBPMEM2_ARCH_SOURCE:.c=.o)
 OBJS += $(addprefix $(TOP)/src/debug/libpmem/, ${OBJS_MEM})
 
 INCS += -I$(TOP)/src/libpmem
-INCS += -I$(TOP)/src/libpmem/$(ARCH)
+INCS += -I$(TOP)/src/libpmem2
+INCS += -I$(TOP)/src/libpmem2/$(ARCH)
 endif
 
 ifeq ($(LIBPMEMCOMMON), y)
@@ -206,7 +209,6 @@ OBJS +=\
 	$(TOP)/src/nondebug/common/os_posix.o\
 	$(TOP)/src/nondebug/common/os_thread_posix.o\
 	$(TOP)/src/nondebug/common/os_deep_linux.o\
-	$(TOP)/src/nondebug/common/os_auto_flush_linux.o\
 	$(TOP)/src/nondebug/common/os_dimm_$(OS_DIMM).o\
 	$(TOP)/src/nondebug/common/out.o\
 	$(TOP)/src/nondebug/common/pool_hdr.o\
@@ -221,9 +223,11 @@ OBJS +=\
 	$(TOP)/src/nondebug/libpmem2/config_posix.o
 
 ifeq ($(OS_KERNEL_NAME),Linux)
-OBJS += $(TOP)/src/nondebug/libpmem2/pmem2_utils_linux.o
+OBJS += $(TOP)/src/nondebug/libpmem2/pmem2_utils_linux.o\
+	$(TOP)/src/nondebug/libpmem2/auto_flush_linux.o
 else
-OBJS += $(TOP)/src/nondebug/libpmem2/pmem2_utils_other.o
+OBJS += $(TOP)/src/nondebug/libpmem2/pmem2_utils_other.o\
+	$(TOP)/src/nondebug/libpmem2/auto_flush_none.o
 endif
 
 INCS += -I$(TOP)/src/common
@@ -248,7 +252,6 @@ OBJS +=\
 	$(TOP)/src/debug/common/os_posix.o\
 	$(TOP)/src/debug/common/os_thread_posix.o\
 	$(TOP)/src/debug/common/os_deep_linux.o\
-	$(TOP)/src/debug/common/os_auto_flush_linux.o\
 	$(TOP)/src/debug/common/os_dimm_$(OS_DIMM).o\
 	$(TOP)/src/debug/common/out.o\
 	$(TOP)/src/debug/common/pool_hdr.o\
@@ -263,12 +266,96 @@ OBJS +=\
 	$(TOP)/src/debug/libpmem2/config_posix.o
 
 ifeq ($(OS_KERNEL_NAME),Linux)
-OBJS += $(TOP)/src/debug/libpmem2/pmem2_utils_linux.o
+OBJS += $(TOP)/src/debug/libpmem2/pmem2_utils_linux.o\
+	$(TOP)/src/debug/libpmem2/auto_flush_linux.o
 else
-OBJS += $(TOP)/src/debug/libpmem2/pmem2_utils_other.o
+OBJS += $(TOP)/src/debug/libpmem2/pmem2_utils_other.o\
+	$(TOP)/src/debug/libpmem2/auto_flush_none.o
 endif
 
 INCS += -I$(TOP)/src/common
+endif
+
+ifeq ($(LIBPMEM2), internal-debug)
+OBJS +=\
+	$(TOP)/src/debug/libpmem2/libpmem2.o\
+	$(TOP)/src/debug/libpmem2/config.o\
+	$(TOP)/src/debug/libpmem2/config_posix.o\
+	$(TOP)/src/debug/libpmem2/errormsg.o\
+	$(TOP)/src/debug/libpmem2/map.o\
+	$(TOP)/src/debug/libpmem2/map_posix.o\
+	$(TOP)/src/debug/libpmem2/memops_generic.o\
+	$(TOP)/src/debug/libpmem2/persist.o\
+	$(TOP)/src/debug/libpmem2/persist_posix.o\
+	$(TOP)/src/debug/libpmem2/pmem2.o\
+	$(TOP)/src/debug/libpmem2/pmem2_utils.o\
+	$(TOP)/src/debug/libpmem2/ravl.o\
+	$(TOP)/src/debug/common/alloc.o\
+	$(TOP)/src/debug/common/fs_posix.o\
+	$(TOP)/src/debug/common/os_posix.o\
+	$(TOP)/src/debug/common/os_thread_posix.o\
+	$(TOP)/src/debug/common/out.o\
+	$(TOP)/src/debug/common/util.o\
+	$(TOP)/src/debug/common/util_posix.o
+
+ifeq ($(OS_KERNEL_NAME),Linux)
+OBJS +=\
+	$(TOP)/src/debug/libpmem2/pmem2_utils_linux.o\
+	$(TOP)/src/debug/libpmem2/auto_flush_linux.o
+else
+OBJS +=\
+	$(TOP)/src/debug/libpmem2/pmem2_utils_other.o\
+	$(TOP)/src/debug/libpmem2/auto_flush_none.o
+endif
+
+include $(TOP)/src/libpmem2/$(ARCH)/sources.inc
+OBJS_MEM = $(LIBPMEM2_ARCH_SOURCE:.c=.o)
+OBJS += $(addprefix $(TOP)/src/nondebug/libpmem2/, ${OBJS_MEM})
+
+INCS += -I$(TOP)/src/common
+INCS += -I$(TOP)/src/libpmem2
+INCS += -I$(TOP)/src/libpmem2/$(ARCH)
+endif
+
+ifeq ($(LIBPMEM2), internal-nondebug)
+OBJS +=\
+	$(TOP)/src/nondebug/libpmem2/libpmem2.o\
+	$(TOP)/src/nondebug/libpmem2/config.o\
+	$(TOP)/src/nondebug/libpmem2/config_posix.o\
+	$(TOP)/src/nondebug/libpmem2/errormsg.o\
+	$(TOP)/src/nondebug/libpmem2/map.o\
+	$(TOP)/src/nondebug/libpmem2/map_posix.o\
+	$(TOP)/src/nondebug/libpmem2/memops_generic.o\
+	$(TOP)/src/nondebug/libpmem2/persist.o\
+	$(TOP)/src/nondebug/libpmem2/persist_posix.o\
+	$(TOP)/src/nondebug/libpmem2/pmem2.o\
+	$(TOP)/src/nondebug/libpmem2/pmem2_utils.o\
+	$(TOP)/src/nondebug/libpmem2/ravl.o\
+	$(TOP)/src/nondebug/common/alloc.o\
+	$(TOP)/src/nondebug/common/fs_posix.o\
+	$(TOP)/src/nondebug/common/os_posix.o\
+	$(TOP)/src/nondebug/common/os_thread_posix.o\
+	$(TOP)/src/nondebug/common/out.o\
+	$(TOP)/src/nondebug/common/util.o\
+	$(TOP)/src/nondebug/common/util_posix.o
+
+ifeq ($(OS_KERNEL_NAME),Linux)
+OBJS +=\
+	$(TOP)/src/nondebug/libpmem2/pmem2_utils_linux.o\
+	$(TOP)/src/nondebug/libpmem2/auto_flush_linux.o
+else
+OBJS +=\
+	$(TOP)/src/nondebug/libpmem2/pmem2_utils_other.o\
+	$(TOP)/src/nondebug/libpmem2/auto_flush_none.o
+endif
+
+include $(TOP)/src/libpmem2/$(ARCH)/sources.inc
+OBJS_MEM = $(LIBPMEM2_ARCH_SOURCE:.c=.o)
+OBJS += $(addprefix $(TOP)/src/debug/libpmem2/, ${OBJS_MEM})
+
+INCS += -I$(TOP)/src/common
+INCS += -I$(TOP)/src/libpmem2
+INCS += -I$(TOP)/src/libpmem2/$(ARCH)
 endif
 
 ifeq ($(LIBPMEM),y)
@@ -289,7 +376,7 @@ STATIC_DEBUG_LIBS += $(LIBS_DIR)/debug/librpmem.a
 STATIC_NONDEBUG_LIBS += $(LIBS_DIR)/nondebug/librpmem.a
 endif
 
-ifneq ($(LIBPMEMCOMMON)$(LIBPMEM)$(LIBPMEMPOOL)$(LIBPMEMBLK)$(LIBPMEMLOG)$(LIBPMEMOBJ)$(LIBRPMEM),)
+ifneq ($(LIBPMEMCOMMON)$(LIBPMEM)$(LIBPMEM2)$(LIBPMEMPOOL)$(LIBPMEMBLK)$(LIBPMEMLOG)$(LIBPMEMOBJ)$(LIBRPMEM),)
 LIBS += -pthread
 endif
 

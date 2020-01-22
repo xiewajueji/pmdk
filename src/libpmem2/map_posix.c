@@ -1,5 +1,5 @@
 /*
- * Copyright 2019, Intel Corporation
+ * Copyright 2019-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,15 +39,17 @@
 #include <string.h>
 #include <sys/mman.h>
 
-#include "valgrind_internal.h"
-
 #include "libpmem2.h"
+
 #include "alloc.h"
-#include "out.h"
-#include "file.h"
+#include "auto_flush.h"
 #include "config.h"
+#include "file.h"
 #include "map.h"
+#include "out.h"
+#include "persist.h"
 #include "pmem2_utils.h"
+#include "valgrind_internal.h"
 
 #ifndef MAP_SYNC
 #define MAP_SYNC 0x80000
@@ -59,6 +61,48 @@
 
 #define MEGABYTE ((uintptr_t)1 << 20)
 #define GIGABYTE ((uintptr_t)1 << 30)
+
+/* indicates the cases in which the error cannot occur */
+#define GRAN_IMPOSSIBLE "impossible"
+#ifdef __linux__
+	/* requested CACHE_LINE, available PAGE */
+#define REQ_CL_AVAIL_PG \
+	"requested granularity not available because fd doesn't point to DAX-enabled file " \
+	"or kernel doesn't support MAP_SYNC flag (Linux >= 4.15)"
+
+/* requested BYTE, available PAGE */
+#define REQ_BY_AVAIL_PG REQ_CL_AVAIL_PG
+
+/* requested BYTE, available CACHE_LINE */
+#define REQ_BY_AVAIL_CL \
+	"requested granularity not available because the platform doesn't support eADR"
+
+static const char *granularity_err_msg[3][3] = {
+/*		requested granularity / available granularity		*/
+/* -------------------------------------------------------------------- */
+/*		BYTE		CACHE_LINE		PAGE		*/
+/* -------------------------------------------------------------------- */
+/* BYTE */ {GRAN_IMPOSSIBLE,	REQ_BY_AVAIL_CL,	REQ_BY_AVAIL_PG},
+/* CL	*/ {GRAN_IMPOSSIBLE,	GRAN_IMPOSSIBLE,	REQ_CL_AVAIL_PG},
+/* PAGE */ {GRAN_IMPOSSIBLE,	GRAN_IMPOSSIBLE,	GRAN_IMPOSSIBLE}};
+#else
+/* requested CACHE_LINE, available PAGE */
+#define REQ_CL_AVAIL_PG \
+	"the operating system doesn't provide a method of detecting granularity"
+
+/* requested BYTE, available PAGE */
+#define REQ_BY_AVAIL_PG \
+	"the operating system doesn't provide a method of detecting whether the platform supports eADR"
+
+static const char *granularity_err_msg[3][3] = {
+/*		requested granularity / available granularity		*/
+/* -------------------------------------------------------------------- */
+/*		BYTE		CACHE_LINE		PAGE		*/
+/* -------------------------------------------------------------------- */
+/* BYTE */ {GRAN_IMPOSSIBLE,	GRAN_IMPOSSIBLE,	REQ_BY_AVAIL_PG},
+/* CL	*/ {GRAN_IMPOSSIBLE,	GRAN_IMPOSSIBLE,	REQ_CL_AVAIL_PG},
+/* PAGE */ {GRAN_IMPOSSIBLE,	GRAN_IMPOSSIBLE,	GRAN_IMPOSSIBLE}};
+#endif
 
 /*
  * get_map_alignment -- (internal) choose the desired mapping alignment
@@ -91,7 +135,7 @@ get_map_alignment(size_t len, size_t req_align)
  * 1GB alignment, it results in 1024 possible locations.
  */
 static int
-map_reserve(size_t len, size_t alignment, void **reserv)
+map_reserve(size_t len, size_t alignment, void **reserv, size_t *reslen)
 {
 	ASSERTne(reserv, NULL);
 
@@ -113,17 +157,32 @@ map_reserve(size_t len, size_t alignment, void **reserv)
 
 	LOG(4, "system choice %p", daddr);
 	*reserv = (void *)roundup((uintptr_t)daddr, alignment);
+	/*
+	 * since the last part of the reservation from (reserv + reslen == end)
+	 * will be unmapped, the 'end' address has to be page-aligned.
+	 * 'reserv' is already page-aligned (or even aligned to multiple of page
+	 * size) so it is enough to page-align the 'reslen' value.
+	 */
+	*reslen = roundup(len, Pagesize);
 	LOG(4, "hint %p", *reserv);
 
 	/*
 	 * The placeholder mapping is divided into few parts:
 	 *
-	 * daddr  reserv    (reserv + len)    (daddr + dlength)
-	 * |......|uuuuuuuuu|.................|
+	 * 1      2         3   4                 5
+	 * |......|uuuuuuuuu|rrr|.................|
+	 *
+	 * Addresses:
+	 * 1 == daddr
+	 * 2 == reserv
+	 * 3 == reserv + len
+	 * 4 == reserv + reslen == end (has to be page-aligned)
+	 * 5 == daddr + dlength
 	 *
 	 * Key:
 	 * - '.' is an unused part of the placeholder
 	 * - 'u' is where the actual mapping lies
+	 * - 'r' is what reserved as padding
 	 */
 
 	/* unmap the placeholder before the actual mapping */
@@ -136,15 +195,15 @@ map_reserve(size_t len, size_t alignment, void **reserv)
 	}
 
 	/* unmap the placeholder after the actual mapping */
-	const size_t after = dlength - len - before;
-	void *end = (void *)((uintptr_t)(*reserv) + (uintptr_t)len);
+	const size_t after = dlength - *reslen - before;
+	void *end = (void *)((uintptr_t)(*reserv) + (uintptr_t)*reslen);
 	if (after)
 		if (munmap(end, after)) {
 			ERR("!munmap");
 			return PMEM2_E_ERRNO;
 		}
 
-	return PMEM2_E_OK;
+	return 0;
 }
 
 /*
@@ -171,7 +230,7 @@ file_map(void *reserv, size_t len, int proto, int flags,
 	if (*base != MAP_FAILED) {
 		LOG(4, "mmap with MAP_SYNC succeeded");
 		*map_sync = true;
-		return PMEM2_E_OK;
+		return 0;
 	}
 
 	/* try to mmap with MAP_SHARED flag (without MAP_SYNC) */
@@ -181,7 +240,7 @@ file_map(void *reserv, size_t len, int proto, int flags,
 				offset);
 		if (*base != MAP_FAILED) {
 			*map_sync = false;
-			return PMEM2_E_OK;
+			return 0;
 		}
 	}
 
@@ -210,7 +269,7 @@ unmap(void *addr, size_t len)
 		return PMEM2_E_ERRNO;
 	}
 
-	return PMEM2_E_OK;
+	return 0;
 }
 
 /*
@@ -220,17 +279,23 @@ int
 pmem2_map(const struct pmem2_config *cfg, struct pmem2_map **map_ptr)
 {
 	LOG(3, "cfg %p map_ptr %p", cfg, map_ptr);
-	int ret = PMEM2_E_OK;
+
+	int ret = 0;
 	struct pmem2_map *map;
 	size_t file_len;
+	*map_ptr = NULL;
 
 	if (cfg->fd == INVALID_FD) {
 		ERR("the provided file descriptor is invalid");
-		return PMEM2_E_INVALID_FILE_HANDLE;
+		return PMEM2_E_FILE_HANDLE_NOT_SET;
 	}
 
-	os_off_t off = (os_off_t)cfg->offset;
-	ASSERTeq((size_t)off, cfg->offset);
+	if (cfg->requested_max_granularity == PMEM2_GRANULARITY_INVALID) {
+		ERR(
+			"please define the max granularity requested for the mapping");
+
+		return PMEM2_E_GRANULARITY_NOT_SET;
+	}
 
 	/* get file size */
 	ret = pmem2_config_get_file_size(cfg, &file_len);
@@ -247,6 +312,15 @@ pmem2_map(const struct pmem2_config *cfg, struct pmem2_map **map_ptr)
 	ret = pmem2_get_type_from_stat(&st, &file_type);
 	if (ret)
 		return ret;
+
+	/* get offset */
+	size_t offset;
+	ret = pmem2_validate_offset(cfg, &offset);
+	if (ret)
+		return ret;
+	os_off_t off = (os_off_t)offset;
+
+	ASSERTeq((size_t)off, cfg->offset);
 
 	/* map input and output variables */
 	bool map_sync;
@@ -265,56 +339,92 @@ pmem2_map(const struct pmem2_config *cfg, struct pmem2_map **map_ptr)
 
 	ASSERT(file_type == PMEM2_FTYPE_REG || file_type == PMEM2_FTYPE_DEVDAX);
 
-	size_t length;
-	ret = pmem2_get_length(cfg, file_len, &length);
+	size_t content_length, reserved_length = 0;
+	ret = pmem2_config_validate_length(cfg, file_len);
 	if (ret)
 		return ret;
 
-	const size_t alignment = get_map_alignment(length, cfg->alignment);
+	/* without user-provided length, map to the end of the file */
+	if (cfg->length)
+		content_length = cfg->length;
+	else
+		content_length = file_len - cfg->offset;
+
+	const size_t alignment = get_map_alignment(content_length,
+			cfg->alignment);
 
 	/* find a hint for the mapping */
 	void *reserv = NULL;
-	ret = map_reserve(length, alignment, &reserv);
-	if (ret != PMEM2_E_OK) {
+	ret = map_reserve(content_length, alignment, &reserv, &reserved_length);
+	if (ret != 0) {
 		LOG(1, "cannot find a contiguous region of given size");
 		return ret;
 	}
 	ASSERTne(reserv, NULL);
 
-	ret = file_map(reserv, length, proto, flags, cfg->fd, off, &map_sync,
-			&addr);
+	ret = file_map(reserv, content_length, proto, flags, cfg->fd, off,
+			&map_sync, &addr);
 	if (ret == -EACCES) {
 		proto = PROT_READ;
-		ret = file_map(reserv, length, proto, flags, cfg->fd, off,
-				&map_sync, &addr);
+		ret = file_map(reserv, content_length, proto, flags, cfg->fd,
+				off, &map_sync, &addr);
 	}
 
 	if (ret) {
 		/* unmap the reservation mapping */
-		munmap(reserv, length);
+		munmap(reserv, reserved_length);
 		return ret;
 	}
 
 	LOG(3, "mapped at %p", addr);
 
-	/* prepare pmem2_map structure */
-	map = (struct pmem2_map *)pmem2_malloc(sizeof(*map), &ret);
-	if (!map) {
-		unmap(addr, length);
-		return ret;
+	bool eADR = (pmem2_auto_flush() == 1);
+	enum pmem2_granularity available_min_granularity =
+		get_min_granularity(eADR, map_sync);
+
+	if (available_min_granularity > cfg->requested_max_granularity) {
+		const char *err = granularity_err_msg
+			[cfg->requested_max_granularity]
+			[available_min_granularity];
+		if (strcmp(err, GRAN_IMPOSSIBLE) == 0)
+			FATAL(
+				"unhandled granularity error: available_min_granularity: %d" \
+				"requested_max_granularity: %d",
+				available_min_granularity,
+				cfg->requested_max_granularity);
+		ERR("%s", err);
+		ret = PMEM2_E_GRANULARITY_NOT_SUPPORTED;
+		goto err;
 	}
 
+	/* prepare pmem2_map structure */
+	map = (struct pmem2_map *)pmem2_malloc(sizeof(*map), &ret);
+	if (!map)
+		goto err;
+
 	map->addr = addr;
-	/* XXX require eADR detection to set PMEM2_GRANULARITY_BYTE */
-	map->effective_granularity = map_sync ? PMEM2_GRANULARITY_CACHE_LINE :
-			PMEM2_GRANULARITY_PAGE;
-	map->length = length;
+	map->reserved_length = reserved_length;
+	map->content_length = content_length;
+	map->effective_granularity = available_min_granularity;
+	pmem2_set_flush_fns(map);
+
+	ret = pmem2_register_mapping(map);
+	if (ret)
+		goto err_register;
+
 	*map_ptr = map;
 
-	VALGRIND_REGISTER_PMEM_MAPPING(map->addr, map->length);
-	VALGRIND_REGISTER_PMEM_FILE(cfg->fd, map->addr, map->length, 0);
+	VALGRIND_REGISTER_PMEM_MAPPING(map->addr, map->content_length);
+	VALGRIND_REGISTER_PMEM_FILE(cfg->fd, map->addr, map->content_length, 0);
 
+	return 0;
+
+err_register:
+	free(map);
+err:
+	unmap(addr, reserved_length);
 	return ret;
+
 }
 
 /*
@@ -325,14 +435,18 @@ pmem2_unmap(struct pmem2_map **map_ptr)
 {
 	LOG(3, "map_ptr %p", map_ptr);
 
-	int ret = PMEM2_E_OK;
+	int ret = 0;
 	struct pmem2_map *map = *map_ptr;
 
-	ret = unmap(map->addr, map->length);
+	ret = pmem2_unregister_mapping(map);
 	if (ret)
 		return ret;
 
-	VALGRIND_REMOVE_PMEM_MAPPING(map->addr, map->length);
+	ret = unmap(map->addr, map->reserved_length);
+	if (ret)
+		return ret;
+
+	VALGRIND_REMOVE_PMEM_MAPPING(map->addr, map->content_length);
 
 	Free(map);
 	*map_ptr = NULL;

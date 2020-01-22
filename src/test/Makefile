@@ -1,5 +1,5 @@
 #
-# Copyright 2014-2019, Intel Corporation
+# Copyright 2014-2020, Intel Corporation
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -87,6 +87,8 @@ OBJ_TESTS = \
 	obj_ctl_heap_size\
 	obj_ctl_stats\
 	obj_debug\
+	obj_defrag\
+	obj_defrag_advanced\
 	obj_direct\
 	obj_direct_volatile\
 	obj_extend\
@@ -122,7 +124,6 @@ OBJ_TESTS = \
 	obj_pool\
 	obj_pool_lock\
 	obj_pool_lookup\
-	obj_ravl\
 	obj_recovery\
 	obj_recreate\
 	obj_root\
@@ -143,6 +144,7 @@ OBJ_TESTS = \
 	obj_tx_mt\
 	obj_tx_realloc\
 	obj_tx_strdup\
+	obj_tx_user_data\
 	obj_ulog_size\
 	obj_zones
 
@@ -194,6 +196,7 @@ OTHER_TESTS = \
 	util_poolset_foreach\
 	util_poolset_parse\
 	util_poolset_size\
+	util_ravl\
 	util_sds\
 	util_uuid_generate\
 	util_vec\
@@ -221,10 +224,15 @@ PMEM_TESTS = \
 	pmem_unmap
 
 PMEM2_TESTS = \
+	pmem2_compat\
 	pmem2_config\
+	pmem2_config_get_alignment\
 	pmem2_config_get_file_size\
-	pmem2_map\
-	pmem2_include
+	pmem2_granularity\
+	pmem2_include\
+	pmem2_integration\
+	pmem2_granularity_detection\
+	pmem2_map
 
 PMEMPOOL_TESTS = \
 	pmempool_check\
@@ -254,6 +262,7 @@ RPMEM_TESTS = \
 
 EXAMPLES_TESTS = \
 	ex_libpmem\
+	ex_libpmem2\
 	ex_libpmemblk\
 	ex_libpmemlog\
 	ex_libpmemobj\
@@ -332,6 +341,17 @@ TESTS_BUILD = \
 	$(LIBPMEMPOOL_MOD_DEPS)\
 	$(TESTS)
 
+ifneq ($(BLACKLIST_FILE),)
+ifeq ("$(wildcard $(BLACKLIST_FILE))","")
+$(error Missing blacklist file: $(BLACKLIST_FILE))
+endif
+	BLACKLIST_TESTS := $(shell cat $(BLACKLIST_FILE))
+	TESTS := $(filter-out $(BLACKLIST_TESTS),$(TESTS))
+	LOCAL_TESTS := $(filter-out $(BLACKLIST_TESTS),$(LOCAL_TESTS))
+	REMOTE_TESTS := $(filter-out $(BLACKLIST_TESTS),$(REMOTE_TESTS))
+	TESTS_BUILD := $(filter-out $(BLACKLIST_TESTS),$(TESTS_BUILD))
+endif
+
 all     : TARGET = all
 clean   : TARGET = clean
 clobber : TARGET = clobber
@@ -390,12 +410,14 @@ memcheck-summary-leaks:
 	grep "in use at exit" */memcheck*.log | grep -v " 0 bytes in 0 blocks" || true
 
 check:
+	@[ -z "$(BLACKLIST_TESTS)" ] || echo "Blacklisted tests: $(BLACKLIST_TESTS)"
 	@./RUNTESTS $(RUNTEST_OPTIONS) $(LOCAL_TESTS)
 	$(MAKE) check-remote-quiet-conditional
 	@echo "No failures."
 
 pycheck:
-	@./RUNTESTS.py $(subst nondebug,release,$(RUNTEST_OPTIONS))
+	@[ -z "$(BLACKLIST_TESTS)" ] || echo "Blacklisted tests: $(BLACKLIST_TESTS)"
+	@./RUNTESTS.py $(subst nondebug,release,$(RUNTEST_OPTIONS)) -- $(TESTS)
 	@echo "No failures."
 
 check-remote-quiet-conditional:

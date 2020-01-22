@@ -1,5 +1,5 @@
 #
-# Copyright 2014-2019, Intel Corporation
+# Copyright 2014-2020, Intel Corporation
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -35,11 +35,13 @@
 TOP := $(dir $(lastword $(MAKEFILE_LIST)))..
 include $(TOP)/src/common.inc
 
-TARGETS = libpmem libpmemblk libpmemlog libpmemobj libpmempool tools\
-	libpmem2
-ALL_TARGETS = $(TARGETS) common librpmem
+# core targets
+TARGETS = libpmem libpmemblk libpmemlog libpmemobj libpmempool tools
+# make all targets
+ALL_TARGETS = $(TARGETS) common librpmem libpmem2
+# all available targets
 POSSIBLE_TARGETS = $(TARGETS) common librpmem rpmem_common test\
-	examples benchmarks
+	examples benchmarks libpmem2
 
 SCOPE_DIRS = $(TARGETS) common librpmem rpmem_common
 
@@ -62,24 +64,30 @@ CLOBBER_TARGETS = $(POSSIBLE_TARGETS)
 CSTYLE_TARGETS = $(POSSIBLE_TARGETS)
 INSTALL_TARGETS = $(TARGETS)
 SPARSE_TARGETS = $(POSSIBLE_TARGETS)
+EXAMPLES_TARGETS = $(TARGETS) librpmem libpmem2
 
 HEADERS_DESTDIR = $(DESTDIR)$(includedir)
 HEADERS_INSTALL = include/libpmem.h\
 		include/libpmemobj.h include/libpmempool.h\
-		include/libpmemblk.h include/libpmemlog.h\
-		include/libpmem2.h
+		include/libpmemblk.h include/libpmemlog.h
 
 OBJ_HEADERS_INSTALL = include/libpmemobj/*.h
 
 PKG_CONFIG_DESTDIR = $(DESTDIR)$(pkgconfigdir)
 PKG_CONFIG_COMMON = common.pc
 PKG_CONFIG_FILES = libpmem.pc libpmemobj.pc libpmemlog.pc libpmemblk.pc\
-		libpmempool.pc libpmem2.pc
+		libpmempool.pc
 PMREORDER_BIN = $(DESTDIR)$(bindir)
 PMREORDER_SRC = tools/pmreorder
 PMREORDER_FILES = $(PMREORDER_SRC)/*.py
 PMREORDER_DESTDIR = $(DESTDIR)$(datarootdir)/pmreorder
 PMREORDER_ROOTDIR = $(datarootdir)/pmreorder
+
+ifeq ($(PMEM2_INSTALL),y)
+	PKG_CONFIG_FILES += libpmem2.pc
+	HEADERS_INSTALL += include/libpmem2.h
+	INSTALL_TARGETS += libpmem2
+endif
 
 ifeq ($(BUILD_RPMEM),y)
 	PKG_CONFIG_FILES += librpmem.pc
@@ -127,7 +135,7 @@ clean: $(CLEAN_TARGETS:=-clean)
 clobber: $(CLOBBER_TARGETS:=-clobber)
 cstyle: $(CSTYLE_TARGETS:=-cstyle)
 format: $(CSTYLE_TARGETS:=-format)
-examples benchmarks: $(TARGETS)
+examples benchmarks: $(EXAMPLES_TARGETS)
 benchmarks: examples
 sparse: $(SPARSE_TARGETS:=-sparse)
 
@@ -150,7 +158,10 @@ $(PKG_CONFIG_COMMON): pkg-cfg-common
 
 pkg-config: $(PKG_CONFIG_FILES)
 
-$(eval $(call sub-target,$(INSTALL_TARGETS),install,y))
+%-install: %
+	$(MAKE) -C $^ install
+	$(MAKE) -C $^ install DEBUG=1
+
 $(eval $(call sub-target,$(INSTALL_TARGETS),uninstall,y))
 $(eval $(call sub-target,$(CLEAN_TARGETS),clean,y))
 $(eval $(call sub-target,$(CLOBBER_TARGETS),clobber,y))
@@ -203,7 +214,7 @@ install: all pkg-config
 	install -d $(PMREORDER_DESTDIR)
 	install -p -m 0644 $(PMREORDER_FILES) $(PMREORDER_DESTDIR)
 	@echo "#!/bin/sh" > $(PMREORDER_SRC)/pmreorder
-	@echo "exec python3 $(PMREORDER_ROOTDIR)/pmreorder.py \$$*" >> $(PMREORDER_SRC)/pmreorder
+	@echo "exec python3 $(PMREORDER_ROOTDIR)/pmreorder.py $(SRCVERSION) \$$*" >> $(PMREORDER_SRC)/pmreorder
 	install -d $(PMREORDER_BIN)
 	install -p $(PMREORDER_SRC)/pmreorder $(PMREORDER_BIN)
 	$(RM) $(PKG_CONFIG_FILES)

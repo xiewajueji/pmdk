@@ -1,5 +1,5 @@
 /*
- * Copyright 2019, Intel Corporation
+ * Copyright 2019-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,57 +34,52 @@
  * pmem2_config_get_file_size.c -- pmem2_config_get_file_size unittests
  */
 
-/* for O_TMPFILE */
-#define _GNU_SOURCE
-
-#include <fcntl.h>
 #include <stdint.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 
 #include "fault_injection.h"
 #include "unittest.h"
 #include "ut_pmem2_utils.h"
 #include "ut_pmem2_config.h"
+#include "ut_fh.h"
 #include "config.h"
+#include "out.h"
 
 typedef void (*test_fun)(const char *path, os_off_t size);
 
 /*
  * test_notset_fd - tests what happens when file descriptor was not set
  */
-static void
-test_notset_fd(const char *ignored_path, os_off_t ignored_size)
+static int
+test_notset_fd(const struct test_case *tc, int argc, char *argv[])
 {
 	struct pmem2_config cfg;
-	config_init(&cfg);
+	pmem2_config_init(&cfg);
 	size_t size;
 	int ret = pmem2_config_get_file_size(&cfg, &size);
 
-	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_INVALID_FILE_HANDLE);
+	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_FILE_HANDLE_NOT_SET);
+
+	return 0;
 }
 
 static void
-init_cfg(struct pmem2_config *cfg, int fd)
+init_cfg(struct pmem2_config *cfg, struct FHandle *f)
 {
-	config_init(cfg);
-#ifdef _WIN32
-	cfg->handle = (HANDLE)_get_osfhandle(fd);
-#else
-	cfg->fd = fd;
-#endif
+	pmem2_config_init(cfg);
+	PMEM2_CONFIG_SET_FHANDLE(cfg, f);
 }
 
 /*
- * test_normal_file - tests normal file
+ * test_normal_file - tests normal file (common)
  */
 static void
-test_normal_file(const char *path, os_off_t expected_size)
+test_normal_file(const char *path, os_off_t expected_size,
+		enum file_handle_type type)
 {
-	int fd = OPEN(path, O_RDWR);
+	struct FHandle *fh = UT_FH_OPEN(type, path, FH_RDWR);
 
 	struct pmem2_config cfg;
-	init_cfg(&cfg, fd);
+	init_cfg(&cfg, fh);
 
 	size_t size = SIZE_MAX;
 	int ret = pmem2_config_get_file_size(&cfg, &size);
@@ -92,21 +87,58 @@ test_normal_file(const char *path, os_off_t expected_size)
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 	UT_ASSERTeq(size, expected_size);
 
-	CLOSE(fd);
+	UT_FH_CLOSE(fh);
 }
 
-#ifdef O_TMPFILE
+/*
+ * test_normal_file_fd - tests normal file using a file descriptor
+ */
+static int
+test_normal_file_fd(const struct test_case *tc, int argc, char *argv[])
+{
+	if (argc < 2)
+		UT_FATAL("usage: test_normal_file_fd <file> <expected_size>");
+
+	char *path = argv[0];
+	os_off_t expected_size = ATOLL(argv[1]);
+
+	test_normal_file(path, expected_size, FH_FD);
+
+	return 2;
+}
+
+/*
+ * test_normal_file_handle - tests normal file using a HANDLE
+ */
+static int
+test_normal_file_handle(const struct test_case *tc, int argc, char *argv[])
+{
+	if (argc < 2)
+		UT_FATAL("usage: test_normal_file_handle"
+				" <file> <expected_size>");
+
+	char *path = argv[0];
+	os_off_t expected_size = ATOLL(argv[1]);
+
+	test_normal_file(path, expected_size, FH_HANDLE);
+
+	return 2;
+}
+
 /*
  * test_tmpfile - tests temporary file
  */
 static void
-test_tmpfile(const char *dir, os_off_t requested_size)
+test_tmpfile(const char *dir, os_off_t requested_size,
+		enum file_handle_type type)
 {
-	int fd = OPEN(dir, O_RDWR | O_TMPFILE);
-	FTRUNCATE(fd, requested_size);
+	struct FHandle *fh = UT_FH_OPEN(type, dir, FH_RDWR | FH_TMPFILE);
+	UT_FH_TRUNCATE(fh, requested_size);
 
 	struct pmem2_config cfg;
-	init_cfg(&cfg, fd);
+
+	pmem2_config_init(&cfg);
+	init_cfg(&cfg, fh);
 
 	size_t size = SIZE_MAX;
 	int ret = pmem2_config_get_file_size(&cfg, &size);
@@ -114,59 +146,119 @@ test_tmpfile(const char *dir, os_off_t requested_size)
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 	UT_ASSERTeq(size, requested_size);
 
-	CLOSE(fd);
+	UT_FH_CLOSE(fh);
 }
-#endif
 
 /*
- * test_directory - tests directory path
+ * test_tmpfile_fd - tests temporary file using file descriptor interface
+ */
+static int
+test_tmpfile_fd(const struct test_case *tc, int argc, char *argv[])
+{
+	if (argc < 2)
+		UT_FATAL("usage: test_tmpfile_fd <file> <requested_size>");
+
+	char *dir = argv[0];
+	os_off_t requested_size = ATOLL(argv[1]);
+
+	test_tmpfile(dir, requested_size, FH_FD);
+
+	return 2;
+}
+
+/*
+ * test_tmpfile_handle - tests temporary file using file handle interface
+ */
+static int
+test_tmpfile_handle(const struct test_case *tc, int argc, char *argv[])
+{
+	if (argc < 2)
+		UT_FATAL("usage: test_tmpfile_handle <file> <requested_size>");
+
+	char *dir = argv[0];
+	os_off_t requested_size = ATOLL(argv[1]);
+
+	test_tmpfile(dir, requested_size, FH_HANDLE);
+
+	return 2;
+}
+
+/*
+ * test_directory - tests directory path (common)
  */
 static void
-test_directory(const char *dir, os_off_t ignored)
+test_directory(const char *dir, enum file_handle_type type)
 {
-	int fd = OPEN(dir, O_RDONLY);
+	struct FHandle *fh = UT_FH_OPEN(type, dir, FH_RDONLY | FH_DIRECTORY);
 
 	struct pmem2_config cfg;
-	init_cfg(&cfg, fd);
+	init_cfg(&cfg, fh);
 
 	size_t size;
 	int ret = pmem2_config_get_file_size(&cfg, &size);
 
-	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_INVALID_FILE_HANDLE);
+	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_INVALID_FILE_TYPE);
 
-	CLOSE(fd);
+	UT_FH_CLOSE(fh);
 }
 
-static struct test_list {
-	const char *name;
-	test_fun test;
-} list[] = {
-	{"notset_fd", test_notset_fd},
-	{"normal_file", test_normal_file},
-#ifdef O_TMPFILE
-	{"tmp_file", test_tmpfile},
-#endif
-	{"directory", test_directory},
+/*
+ * test_directory_fd - tests directory path using file descriptor interface
+ */
+static int
+test_directory_fd(const struct test_case *tc, int argc, char *argv[])
+{
+	if (argc < 1)
+		UT_FATAL("usage: test_directory_fd <file>");
+
+	char *dir = argv[0];
+
+	test_directory(dir, FH_FD);
+
+	return 1;
+}
+
+/*
+ * test_directory_handle - tests directory path using file handle interface
+ */
+static int
+test_directory_handle(const struct test_case *tc, int argc, char *argv[])
+{
+	if (argc < 1)
+		UT_FATAL("usage: test_directory_handle <file>");
+
+	char *dir = argv[0];
+
+	test_directory(dir, FH_HANDLE);
+
+	return 1;
+}
+
+/*
+ * test_cases -- available test cases
+ */
+static struct test_case test_cases[] = {
+	TEST_CASE(test_notset_fd),
+	TEST_CASE(test_normal_file_fd),
+	TEST_CASE(test_normal_file_handle),
+	TEST_CASE(test_tmpfile_fd),
+	TEST_CASE(test_tmpfile_handle),
+	TEST_CASE(test_directory_fd),
+	TEST_CASE(test_directory_handle),
 };
+
+#define NTESTS (sizeof(test_cases) / sizeof(test_cases[0]))
 
 int
 main(int argc, char **argv)
 {
 	START(argc, argv, "pmem2_config_get_file_size");
-	if (argc != 4)
-		UT_FATAL("usage: %s test_case path size", argv[0]);
 
-	char *test_case = argv[1];
-	char *path = argv[2];
-	os_off_t size = ATOLL(argv[3]);
+	util_init();
+	out_init("pmem2_config_get_file_size", "TEST_LOG_LEVEL",
+			"TEST_LOG_FILE", 0, 0);
+	TEST_CASE_PROCESS(argc, argv, test_cases, NTESTS);
+	out_fini();
 
-	for (int i = 0; i < ARRAY_SIZE(list); i++) {
-		if (strcmp(list[i].name, test_case) == 0) {
-			list[i].test(path, size);
-			goto end;
-		}
-	}
-	UT_FATAL("test: %s doesn't exist", test_case);
-end:
 	DONE(NULL);
 }

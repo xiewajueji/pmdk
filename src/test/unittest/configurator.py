@@ -37,8 +37,11 @@ import string
 import sys
 from datetime import timedelta
 
+import builds
 import context as ctx
+import granularity
 import futils
+import test_types
 import valgrind as vg
 
 try:
@@ -59,13 +62,25 @@ class _ConfigFromDict:
     # special method triggered if class attribute was not found
     # https://docs.python.org/3.5/reference/datamodel.html#object.__getattr__
     def __getattr__(self, name):
-        if name == 'pmem_fs_dir':
-            raise futils.Skip('No PMEM test directory provided')
-        if name == 'non_pmem_fs_dir':
-            raise futils.Skip('No non-PMEM test directory provided')
+        if name == 'page_fs_dir':
+            raise futils.Skip('Configuration field "{}" not found. '
+                              'No page granularity test directory '
+                              'provided'.format(name))
 
-        sys.exit('Provided test configuration may be invalid. '
-                 'No "{}" field found in configuration.'.format(name))
+        if name == 'cacheline_fs_dir':
+            raise futils.Skip('Configuration field "{}" not found. '
+                              'No cache line granularity test '
+                              'directory provided'.format(name))
+
+        if name == 'byte_fs_dir':
+            raise futils.Skip('Configuration field "{}" not found. '
+                              'No byte granularity test directory '
+                              'provided'.format(name))
+
+        raise AttributeError('Provided test configuration may be '
+                             'invalid. No "{}" field found in '
+                             'configuration.'
+                             .format(name))
 
 
 def _str2list(config):
@@ -150,9 +165,9 @@ def _str2ctx(config):
             classes = [class_from_string(cl, base) for cl in config[key]]
             config[key] = ctx.expand(*classes)
 
-    convert_internal('build', ctx._Build)
-    convert_internal('test_type', ctx._TestType)
-    convert_internal('fs', ctx._Fs)
+    convert_internal('build', builds.Build)
+    convert_internal('test_type', test_types._TestType)
+    convert_internal('granularity', granularity.Granularity)
 
     if config['force_enable'] is not None:
         config['force_enable'] = next(
@@ -164,7 +179,7 @@ class Configurator():
     """Parser for user test configuration"""
 
     def __init__(self):
-        self.argparser = self._init_argparser()
+        self.config = self.parse_config()
 
     def parse_config(self):
         """
@@ -172,6 +187,7 @@ class Configurator():
         composed from 2 config values - values from testconfig.py file
         and values provided by command line args.
         """
+        self.argparser = self._init_argparser()
         try:
             args_config = self._get_args_config()
 
@@ -183,11 +199,20 @@ class Configurator():
             self._convert_to_usable_types(config)
 
             # Remake dict into class object for convenient fields acquisition
-            return _ConfigFromDict(config)
+            config = _ConfigFromDict(config)
+
+            # device_dax_path may be either a single string with path
+            # or a sequence of paths
+            if sys.platform != 'win32':
+                config.device_dax_path = futils.to_list(config.device_dax_path,
+                                                        str)
+
+            return config
 
         except KeyError as e:
-            sys.exit("No config field '{}' found. "
-                     "testconfig.py file may be invalid.".format(e.args[0]))
+            print("No config field '{}' found. "
+                  "testconfig.py file may be invalid.".format(e.args[0]))
+            raise
 
     def _convert_to_usable_types(self, config):
         """
@@ -241,14 +266,16 @@ class Configurator():
                             help='continue execution despite test fails')
         parser.add_argument('-b', dest='build',
                             help='run only specified build type',
-                            choices=ctx_choices(ctx._Build), nargs='*')
-        parser.add_argument('-f', dest='fs',
-                            choices=ctx_choices(ctx._Fs), nargs='*',
-                            help='run tests on specified filesystem types.')
+                            choices=ctx_choices(builds.Build), nargs='*')
+        parser.add_argument('-g', dest='granularity',
+                            choices=ctx_choices(granularity.Granularity),
+                            nargs='*', help='run tests on a filesystem'
+                            ' with specified granularity types.')
         parser.add_argument('-t', dest='test_type',
                             help='run only specified test type where'
                             'check = short + medium',
-                            choices=ctx_choices(ctx._TestType), nargs='*')
+                            choices=ctx_choices(test_types._TestType),
+                            nargs='*')
         parser.add_argument('-o', dest='timeout',
                             help="set timeout for test execution timeout:"
                             "integer with an optional suffix:''s' for seconds,"
@@ -258,6 +285,9 @@ class Configurator():
                             'e.g.: 0-2,5 will execute TEST0, '
                             'TEST1, TEST2 and TEST5',
                             default='')
+        parser.add_argument('--fail-on-skip', dest='fail_on_skip',
+                            action='store_const', const=True,
+                            help='Skipping tests also fail')
 
         tracers = parser.add_mutually_exclusive_group()
         tracers.add_argument('--tracer', dest='tracer', help='run C binary '

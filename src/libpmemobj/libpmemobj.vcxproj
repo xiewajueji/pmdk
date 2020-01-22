@@ -22,7 +22,7 @@
     <ClCompile Include="..\..\src\libpmemobj\obj.c" />
     <ClCompile Include="..\..\src\libpmemobj\palloc.c" />
     <ClCompile Include="..\..\src\libpmemobj\pmalloc.c" />
-    <ClCompile Include="..\..\src\libpmemobj\ravl.c" />
+    <ClCompile Include="..\common\ravl.c" />
     <ClCompile Include="..\..\src\libpmemobj\ulog.c" />
     <ClCompile Include="..\..\src\libpmemobj\sync.c" />
     <ClCompile Include="..\..\src\libpmemobj\tx.c" />
@@ -39,7 +39,6 @@
     <ClCompile Include="..\common\fs_windows.c" />
     <ClCompile Include="..\common\mmap.c" />
     <ClCompile Include="..\common\mmap_windows.c" />
-    <ClCompile Include="..\common\os_auto_flush_windows.c" />
     <ClCompile Include="..\common\os_deep_windows.c" />
     <ClCompile Include="..\common\os_dimm_windows.c" />
     <ClCompile Include="..\common\os_thread_windows.c" />
@@ -52,6 +51,7 @@
     <ClCompile Include="..\common\util_windows.c" />
     <ClCompile Include="..\common\uuid.c" />
     <ClCompile Include="..\common\uuid_windows.c" />
+    <ClCompile Include="..\libpmem2\auto_flush_windows.c" />
     <ClCompile Include="alloc_class.c" />
     <ClCompile Include="container_ravl.c" />
     <ClCompile Include="container_seglists.c" />
@@ -82,7 +82,7 @@
     <ClInclude Include="..\..\src\libpmemobj\pmalloc.h" />
     <ClInclude Include="..\..\src\libpmemobj\pmemops.h" />
     <ClInclude Include="..\..\src\libpmemobj\redo.h" />
-    <ClInclude Include="..\..\src\libpmemobj\ravl.h" />
+    <ClInclude Include="..\common\ravl.h" />
     <ClInclude Include="..\common\alloc.h" />
     <ClInclude Include="..\common\ctl.h" />
     <ClInclude Include="..\common\ctl_global.h" />
@@ -92,7 +92,6 @@
     <ClInclude Include="..\common\fs.h" />
     <ClInclude Include="..\common\mmap.h" />
     <ClInclude Include="..\common\os.h" />
-    <ClInclude Include="..\common\os_auto_flush.h" />
     <ClInclude Include="..\common\os_deep.h" />
     <ClInclude Include="..\common\os_thread.h" />
     <ClInclude Include="..\common\pmemcommon.h" />
@@ -116,6 +115,8 @@
     <ClInclude Include="..\include\libpmemobj\tx.h" />
     <ClInclude Include="..\include\libpmemobj\tx_base.h" />
     <ClInclude Include="..\include\libpmemobj\types.h" />
+    <ClInclude Include="..\libpmem2\auto_flush.h" />
+    <ClInclude Include="..\libpmem2\auto_flush_windows.h" />
     <ClInclude Include="alloc_class.h" />
     <ClInclude Include="container.h" />
     <ClInclude Include="container_ravl.h" />

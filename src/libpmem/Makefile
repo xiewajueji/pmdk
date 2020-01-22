@@ -47,7 +47,6 @@ SOURCE =\
 	$(COMMON)/os_posix.c\
 	$(COMMON)/os_thread_posix.c\
 	$(COMMON)/os_deep_linux.c\
-	$(COMMON)/os_auto_flush_linux.c\
 	$(COMMON)/out.c\
 	$(COMMON)/util.c\
 	$(COMMON)/util_posix.c\
@@ -60,18 +59,24 @@ SOURCE =\
 	$(PMEM2)/config_posix.c
 
 ifeq ($(OS_KERNEL_NAME),Linux)
-SOURCE += $(PMEM2)/pmem2_utils_linux.c
+SOURCE +=\
+	$(PMEM2)/pmem2_utils_linux.c\
+	$(PMEM2)/auto_flush_linux.c
 else
-SOURCE += $(PMEM2)/pmem2_utils_other.c
+SOURCE +=\
+	$(PMEM2)/pmem2_utils_other.c\
+	$(PMEM2)/auto_flush_none.c
 endif
 
-include $(ARCH)/sources.inc
+INCS += -I$(TOP)/src/libpmem2
 
-SOURCE += $(LIBPMEM_ARCH_SOURCE)
+include ../libpmem2/$(ARCH)/sources.inc
+
+SOURCE += $(LIBPMEM2_ARCH_SOURCE)
 
 include ../Makefile.inc
 
-include $(ARCH)/flags.inc
+include $(PMEM2)/$(ARCH)/flags.inc
 
 CFLAGS += -I.
 LIBS += -pthread

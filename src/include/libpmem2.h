@@ -1,5 +1,5 @@
 /*
- * Copyright 2019, Intel Corporation
+ * Copyright 2019-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -63,14 +63,23 @@
 extern "C" {
 #endif
 
-#define PMEM2_E_OK			(0)
-#define PMEM2_E_UNKNOWN			(-100000)
-#define PMEM2_E_NOSUPP			(-100001)
-#define PMEM2_E_INVALID_ARG		(-100002)
-#define PMEM2_E_INVALID_FILE_HANDLE	(-100003)
-#define PMEM2_E_INVALID_FILE_TYPE	(-100004)
-#define PMEM2_E_MAP_RANGE		(-100005)
-#define PMEM2_E_MAPPING_EXISTS		(-100006)
+#define PMEM2_E_UNKNOWN				(-100000)
+#define PMEM2_E_NOSUPP				(-100001)
+#define PMEM2_E_INVALID_ARG			(-100002)
+#define PMEM2_E_FILE_HANDLE_NOT_SET		(-100003)
+#define PMEM2_E_INVALID_FILE_HANDLE		(-100004)
+#define PMEM2_E_INVALID_FILE_TYPE		(-100005)
+#define PMEM2_E_MAP_RANGE			(-100006)
+#define PMEM2_E_MAPPING_EXISTS			(-100007)
+#define PMEM2_E_GRANULARITY_NOT_SET		(-100008)
+#define PMEM2_E_GRANULARITY_NOT_SUPPORTED	(-100009)
+#define PMEM2_E_OFFSET_OUT_OF_RANGE		(-100010)
+#define PMEM2_E_OFFSET_UNALIGNED		(-100011)
+#define PMEM2_E_INVALID_ALIGNMENT_FORMAT	(-100012)
+#define PMEM2_E_INVALID_ALIGNMENT_VALUE		(-100013)
+#define PMEM2_E_INVALID_SIZE_FORMAT		(-100014)
+#define PMEM2_E_LENGTH_UNALIGNED		(-100015)
+#define PMEM2_E_MAPPING_NOT_FOUND		(-100016)
 
 /* config setup */
 
@@ -112,7 +121,6 @@ int pmem2_config_set_address(struct pmem2_config *cfg, unsigned type,
 	void *addr);
 
 enum pmem2_granularity {
-	PMEM2_GRANULARITY_INVALID,
 	PMEM2_GRANULARITY_BYTE,
 	PMEM2_GRANULARITY_CACHE_LINE,
 	PMEM2_GRANULARITY_PAGE,
@@ -123,13 +131,16 @@ int pmem2_config_set_required_store_granularity(struct pmem2_config *cfg,
 
 int pmem2_config_get_file_size(const struct pmem2_config *cfg, size_t *size);
 
+int pmem2_config_get_alignment(const struct pmem2_config *cfg,
+		size_t *alignment);
+
 /* mapping */
 
 struct pmem2_map;
 
-int pmem2_map(const struct pmem2_config *cfg, struct pmem2_map **map);
+int pmem2_map(const struct pmem2_config *cfg, struct pmem2_map **map_ptr);
 
-int pmem2_unmap(struct pmem2_map **map);
+int pmem2_unmap(struct pmem2_map **map_ptr);
 
 void *pmem2_map_get_address(struct pmem2_map *map);
 
@@ -139,17 +150,17 @@ enum pmem2_granularity pmem2_map_get_store_granularity(struct pmem2_map *map);
 
 /* flushing */
 
-typedef void (*pmem2_persist_fn)(void *ptr, size_t size);
+typedef void (*pmem2_persist_fn)(const void *ptr, size_t size);
 
-typedef void (*pmem2_flush_fn)(void *ptr, size_t size);
+typedef void (*pmem2_flush_fn)(const void *ptr, size_t size);
 
 typedef void (*pmem2_drain_fn)(void);
 
-pmem2_persist_fn *pmem2_get_persist_fn(struct pmem2_map *map);
+pmem2_persist_fn pmem2_get_persist_fn(struct pmem2_map *map);
 
-pmem2_flush_fn *pmem2_get_flush_fn(struct pmem2_map *map);
+pmem2_flush_fn pmem2_get_flush_fn(struct pmem2_map *map);
 
-pmem2_drain_fn *pmem2_get_drain_fn(struct pmem2_map *map);
+pmem2_drain_fn pmem2_get_drain_fn(struct pmem2_map *map);
 
 #define PMEM2_F_MEM_NODRAIN	(1U << 0)
 
@@ -177,11 +188,11 @@ typedef void (*pmem2_memcpy_fn)(void *pmemdest, const void *src, size_t len,
 typedef void (*pmem2_memset_fn)(void *pmemdest, int c, size_t len,
 		unsigned flags);
 
-pmem2_memmove_fn *pmem2_get_memmove_fn(struct pmem2_map *map);
+pmem2_memmove_fn pmem2_get_memmove_fn(struct pmem2_map *map);
 
-pmem2_memcpy_fn *pmem2_get_memcpy_fn(struct pmem2_map *map);
+pmem2_memcpy_fn pmem2_get_memcpy_fn(struct pmem2_map *map);
 
-pmem2_memset_fn *pmem2_get_memset_fn(struct pmem2_map *map);
+pmem2_memset_fn pmem2_get_memset_fn(struct pmem2_map *map);
 
 /* RAS */
 

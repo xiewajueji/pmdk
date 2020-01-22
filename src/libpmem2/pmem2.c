@@ -35,19 +35,6 @@
  */
 
 #include "libpmem2.h"
-#include "pmem2.h"
-
-int
-pmem2_config_set_offset(struct pmem2_config *cfg, size_t offset)
-{
-	return PMEM2_E_NOSUPP;
-}
-
-int
-pmem2_config_set_length(struct pmem2_config *cfg, size_t length)
-{
-	return PMEM2_E_NOSUPP;
-}
 
 int
 pmem2_config_set_sharing(struct pmem2_config *cfg, unsigned type)
@@ -73,55 +60,19 @@ pmem2_config_set_address(struct pmem2_config *cfg, unsigned type, void *addr)
 	return PMEM2_E_NOSUPP;
 }
 
-void *
-pmem2_map_get_address(struct pmem2_map *map)
-{
-	return NULL;
-}
-
-size_t
-pmem2_map_get_size(struct pmem2_map *map)
-{
-	return 0;
-}
-
-enum pmem2_granularity
-pmem2_map_get_store_granularity(struct pmem2_map *map)
-{
-	return PMEM2_GRANULARITY_PAGE;
-}
-
-pmem2_persist_fn *
-pmem2_get_persist_fn(struct pmem2_map *map)
-{
-	return NULL;
-}
-
-pmem2_flush_fn *
-pmem2_get_flush_fn(struct pmem2_map *map)
-{
-	return NULL;
-}
-
-pmem2_drain_fn *
-pmem2_get_drain_fn(struct pmem2_map *map)
-{
-	return NULL;
-}
-
-pmem2_memmove_fn *
+pmem2_memmove_fn
 pmem2_get_memmove_fn(struct pmem2_map *map)
 {
 	return NULL;
 }
 
-pmem2_memcpy_fn *
+pmem2_memcpy_fn
 pmem2_get_memcpy_fn(struct pmem2_map *map)
 {
 	return NULL;
 }
 
-pmem2_memset_fn *
+pmem2_memset_fn
 pmem2_get_memset_fn(struct pmem2_map *map)
 {
 	return NULL;

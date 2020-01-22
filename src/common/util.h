@@ -57,12 +57,19 @@ extern "C" {
 extern unsigned long long Pagesize;
 extern unsigned long long Mmap_align;
 
+#if defined(__x86_64) || defined(_M_X64) || defined(__aarch64__)
 #define CACHELINE_SIZE 64ULL
+#elif defined(__PPC64__)
+#define CACHELINE_SIZE 128ULL
+#else
+#error unable to recognize architecture at compile time
+#endif
 
 #define PAGE_ALIGNED_DOWN_SIZE(size) ((size) & ~(Pagesize - 1))
 #define PAGE_ALIGNED_UP_SIZE(size)\
 	PAGE_ALIGNED_DOWN_SIZE((size) + (Pagesize - 1))
 #define IS_PAGE_ALIGNED(size) (((size) & (Pagesize - 1)) == 0)
+#define IS_MMAP_ALIGNED(size) (((size) & (Mmap_align - 1)) == 0)
 #define PAGE_ALIGN_UP(addr) ((void *)PAGE_ALIGNED_UP_SIZE((uintptr_t)(addr)))
 
 #define ALIGN_UP(size, align) (((size) + (align) - 1) & ~((align) - 1))
@@ -126,6 +133,16 @@ void util_set_alloc_funcs(
 #else
 #define force_inline __attribute__((always_inline)) inline
 #define NORETURN __attribute__((noreturn))
+#endif
+
+#ifdef _MSC_VER
+typedef UNALIGNED uint64_t ua_uint64_t;
+typedef UNALIGNED uint32_t ua_uint32_t;
+typedef UNALIGNED uint16_t ua_uint16_t;
+#else
+typedef uint64_t ua_uint64_t __attribute__((aligned(1)));
+typedef uint32_t ua_uint32_t __attribute__((aligned(1)));
+typedef uint16_t ua_uint16_t __attribute__((aligned(1)));
 #endif
 
 #define util_get_not_masked_bits(x, mask) ((x) & ~(mask))

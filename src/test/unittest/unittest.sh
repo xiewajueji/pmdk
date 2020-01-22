@@ -1,5 +1,5 @@
 #
-# Copyright 2014-2019, Intel Corporation
+# Copyright 2014-2020, Intel Corporation
 # Copyright (c) 2016, Microsoft Corporation. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -146,7 +146,7 @@ shopt -s failglob
 # number of remote nodes required in the current unit test
 NODES_MAX=-1
 
-# sizes of aligments
+# sizes of alignments
 SIZE_4KB=4096
 SIZE_2MB=2097152
 
@@ -861,7 +861,7 @@ function expect_normal_exit() {
 
 	disable_exit_on_error
 
-	eval $ECHO LD_PRELOAD=$TEST_LD_PRELOAD $trace "$*"
+	eval $ECHO $trace "$*"
 	ret=$?
 
 	if [ $REMOTE_VALGRIND_LOG -eq 1 ]; then
@@ -945,8 +945,7 @@ function expect_abnormal_exit() {
 	fi
 
 	disable_exit_on_error
-	eval $ECHO ASAN_OPTIONS="detect_leaks=0 ${ASAN_OPTIONS}" \
-		LD_PRELOAD=$TEST_LD_PRELOAD $TRACE "$*"
+	eval $ECHO ASAN_OPTIONS="detect_leaks=0 ${ASAN_OPTIONS}" $TRACE "$*"
 	ret=$?
 	restore_exit_on_error
 
@@ -1024,7 +1023,7 @@ function require_sudo_allowed() {
 		exit 0
 	fi
 
-	if ! timeout --signal=SIGKILL --kill-after=3s 3s sudo date >/dev/null 2>&1
+	if ! sh -c "timeout --signal=SIGKILL --kill-after=3s 3s sudo date" >/dev/null 2>&1
 	then
 		msg "$UNITTEST_NAME: SKIP required: sudo allowed"
 		exit 0
@@ -1077,14 +1076,50 @@ function require_procfs() {
 	exit 0
 }
 
-function get_arch() {
-	gcc -dumpmachine | awk -F'[/-]' '{print $1}'
+#
+# require_arch -- Skip tests if the running platform not matches
+# any of the input list.
+#
+function require_arch() {
+	for i in "$@"; do
+		[[ "$(arch)" == "$i" ]] && return
+	done
+	msg "$UNITTEST_NAME: SKIP: Only supported on $1"
+	exit 0
 }
 
+#
+# exclude_arch -- Skip tests if the running platform matches
+# any of the input list.
+#
+function exclude_arch() {
+	for i in "$@"; do
+		if [[ "$(arch)" == "$i" ]]; then
+			msg "$UNITTEST_NAME: SKIP: Not supported on $1"
+			exit 0
+		fi
+	done
+}
+
+#
+# require_x86_64 -- Skip tests if the running platform is not x86_64
+#
 function require_x86_64() {
-	[ $(get_arch) = "x86_64" ] && return
-	msg "$UNITTEST_NAME: SKIP: Not supported on arch != x86_64"
-	exit 0
+	require_arch x86_64
+}
+
+#
+# require_ppc64 -- Skip tests if the running platform is not ppc64 or ppc64le
+#
+function require_ppc64() {
+	require_arch "ppc64" "ppc64le" "ppc64el"
+}
+
+#
+# exclude_ppc64 -- Skip tests if the running platform is ppc64 or ppc64le
+#
+function exclude_ppc64() {
+	exclude_arch "ppc64" "ppc64le" "ppc64el"
 }
 
 #
@@ -1927,29 +1962,6 @@ function require_binary() {
 }
 
 #
-# require_preload - continue script execution only if supplied
-#	executable does not generate SIGABRT
-#
-#	Used to check that LD_PRELOAD of, e.g., libvmmalloc is possible
-#
-#	usage: require_preload <errorstr> <executable> [<exec_args>]
-#
-function require_preload() {
-	msg=$1
-	shift
-	trap SIGABRT
-	disable_exit_on_error
-	ret=$(LD_PRELOAD=$TEST_LD_PRELOAD $* 2>&1 /dev/null)
-	ret=$?
-	restore_exit_on_error
-	if [ $ret == 134 ]; then
-		msg "$UNITTEST_NAME: SKIP: $msg not supported"
-		rm -f $1.core
-		exit 0
-	fi
-}
-
-#
 # require_sds -- continue script execution only if binary is compiled with
 #	shutdown state support
 #
@@ -2554,6 +2566,39 @@ function kill_on_node() {
 }
 
 #
+# obj_pool_desc_size -- returns the obj_pool_desc_size macro value
+# in bytes which is two times the actual pagesize.
+#
+# This should be use to calculate the minimum zero size for pool
+# creation on some tests.
+#
+function obj_pool_desc_size() {
+	echo "$(expr $(getconf PAGESIZE) \* 2)"
+}
+
+#
+# log_pool_desc_size -- returns the minimum size of pool header
+# in bytes which is two times the actual pagesize.
+#
+# This should be use to calculate the minimum zero size for pool
+# creation on some tests.
+#
+function log_pool_desc_size() {
+	echo "$(expr $(getconf PAGESIZE) \* 2)"
+}
+
+#
+# blk_pool_desc_size -- returns the minimum size of pool header
+# in bytes which is two times the actual pagesize.
+#
+# This should be use to calculate the minimum zero size for pool
+# creation on some tests.
+#
+function blk_pool_desc_size() {
+	echo "$(expr $(getconf PAGESIZE) \* 2)"
+}
+
+#
 # create_holey_file_on_node -- create holey files of a given length
 #   usage: create_holey_file_on_node <node> <size>
 #
@@ -2783,7 +2828,7 @@ function pass() {
 SIG_LEN=8
 
 # Offset and length of pmemobj layout
-LAYOUT_OFFSET=4096
+LAYOUT_OFFSET=$(getconf PAGE_SIZE)
 LAYOUT_LEN=1024
 
 # Length of arena's signature
@@ -2793,7 +2838,7 @@ ARENA_SIG_LEN=16
 ARENA_SIG="BTT_ARENA_INFO"
 
 # Offset to first arena
-ARENA_OFF=8192
+ARENA_OFF=$(($(getconf PAGE_SIZE) * 2))
 
 #
 # check_file -- check if file exists and print error message if not

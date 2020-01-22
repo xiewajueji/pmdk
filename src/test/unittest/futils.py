@@ -36,6 +36,8 @@ from os.path import join, abspath, dirname
 import os
 import sys
 
+import configurator
+
 # Constant paths to repository elements
 ROOTDIR = abspath(join(dirname(__file__), '..'))
 
@@ -56,19 +58,19 @@ else:
 def get_tool_path(ctx, name):
     if sys.platform == 'win32':
         if str(ctx.build) == 'debug':
-            return abspath(join(WIN_DEBUG_BUILDDIR, 'libs', name + '.exe'))
+            return abspath(join(WIN_DEBUG_BUILDDIR, 'libs', name))
         else:
-            return abspath(join(WIN_RELEASE_BUILDDIR, 'libs', name + '.exe'))
+            return abspath(join(WIN_RELEASE_BUILDDIR, 'libs', name))
     else:
         return abspath(join(ROOTDIR, '..', 'tools', name, name))
 
 
-def get_test_tool_path(ctx, name):
+def get_test_tool_path(build, name):
     if sys.platform == 'win32':
-        if str(ctx.build) == 'debug':
-            return abspath(join(WIN_DEBUG_BUILDDIR, 'tests', name + '.exe'))
+        if str(build) == 'debug':
+            return abspath(join(WIN_DEBUG_BUILDDIR, 'tests', name))
         else:
-            return abspath(join(WIN_RELEASE_BUILDDIR, 'tests', name + '.exe'))
+            return abspath(join(WIN_RELEASE_BUILDDIR, 'tests', name))
     else:
         return abspath(join(ROOTDIR, 'tools', name, name))
 
@@ -78,6 +80,16 @@ def get_lib_dir(ctx):
         return DEBUG_LIBDIR
     else:
         return RELEASE_LIBDIR
+
+
+def get_examples_dir(ctx):
+    if sys.platform == 'win32':
+        if str(ctx.build) == 'debug':
+            return abspath(join(WIN_DEBUG_BUILDDIR, 'examples'))
+        else:
+            return abspath(join(WIN_RELEASE_BUILDDIR, 'examples'))
+    else:
+        return abspath(join(ROOTDIR, '..', 'examples'))
 
 
 class Color:
@@ -96,62 +108,29 @@ class Color:
 class Message:
     """Simple level based logger"""
 
-    def __init__(self, config):
-        self.config = config
+    def __init__(self, level):
+        self.level = level
 
     def print(self, msg):
-        if self.config.unittest_log_level >= 1:
+        if self.level >= 1:
             print(msg)
 
     def print_verbose(self, msg):
-        if self.config.unittest_log_level >= 2:
+        if self.level >= 2:
             print(msg)
-
-
-def filter_contexts(config_ctx, test_ctx):
-    """
-    Return contexts that should be used in execution based on
-    contexts provided by config and test case
-    """
-    if not test_ctx:
-        return [c for c in config_ctx if not c.explicit]
-    return [c for c in config_ctx if c in test_ctx]
-
-
-def run_tests_common(testcases, config):
-    """
-    Common implementation for running tests - used by RUNTESTS.py and
-    single test case interpreter
-    """
-    if config.test_sequence:
-        # filter test cases from sequence
-        testcases = [t for t in testcases if t.testnum in config.test_sequence]
-        # sort testcases so their sequence matches provided test sequence
-        testcases.sort(key=lambda tc: config.test_sequence.index(tc.testnum))
-
-    if not testcases:
-        sys.exit('No testcases to run found for selected configuration.')
-
-    for t in testcases:
-        try:
-            t = t(config)
-        except Skip as s:
-            print(s)
-        else:
-            if t.enabled and t._execute():  # if test failed
-                return 1
-    return 0
 
 
 class Fail(Exception):
     """Thrown when test fails"""
 
-    def __init__(self, message):
-        super().__init__(message)
-        self.message = message
+    def __init__(self, msg):
+        super().__init__(msg)
+        self.messages = []
+        self.messages.append(msg)
 
     def __str__(self):
-        return self.message
+        ret = '\n'.join(self.messages)
+        return ret
 
 
 def fail(msg, exit_code=None):
@@ -162,14 +141,50 @@ def fail(msg, exit_code=None):
 
 class Skip(Exception):
     """Thrown when test should be skipped"""
+    def __init__(self, msg):
+        super().__init__(msg)
+        config = configurator.Configurator().config
+        if config.fail_on_skip:
+            raise Fail(msg)
 
-    def __init__(self, message):
-        super().__init__(message)
-        self.message = message
+        self.messages = []
+        self.messages.append(msg)
 
     def __str__(self):
-        return self.message
+        ret = '\n'.join(self.messages)
+        return ret
 
 
 def skip(msg):
     raise Skip(msg)
+
+
+def set_kwargs_attrs(cls, kwargs):
+    for k, v in kwargs.items():
+        setattr(cls, '{}'.format(k), v)
+
+
+def add_env_common(src, added):
+    """
+    A common implementation of adding an environment variable
+    to the 'src' environment variables dictionary - taking into account
+    that the variable may or may be not already defined.
+    """
+    for k, v in added.items():
+        if k in src:
+            src[k] = v + os.pathsep + src[k]
+        else:
+            src.update({k: v})
+
+
+def to_list(var, *types):
+    """
+    Some variables may be provided by the user either as a single instance of
+    a type or a sequence of instances (e. g. a string or list of strings).
+    To be conveniently treated by the framework code, their types
+    should be unified - casted to lists.
+    """
+    if isinstance(var, tuple(types)):
+        return [var, ]
+    else:
+        return var

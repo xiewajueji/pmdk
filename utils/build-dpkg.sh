@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright 2014-2019, Intel Corporation
+# Copyright 2014-2020, Intel Corporation
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -49,6 +49,7 @@ usage()
 Usage: $0 [ -h ] -t version-tag -s source-dir -w working-dir -o output-dir
 	[ -e build-experimental ] [ -c run-check ]
 	[ -n with-ndctl ] [ -f testconfig-file ]
+	[ -p build-libpmem2 ]
 
 -h			print this help message
 -t version-tag		source version tag
@@ -59,6 +60,7 @@ Usage: $0 [ -h ] -t version-tag -s source-dir -w working-dir -o output-dir
 -c run-check		run package check
 -n with-ndctl		build with libndctl
 -f testconfig-file	custom testconfig.sh
+-p build-libpmem2	build libpmem2 packages
 EOF
 	exit 1
 }
@@ -66,7 +68,7 @@ EOF
 #
 # command-line argument processing...
 #
-args=`getopt he:c:r:n:t:d:s:w:o:f: $*`
+args=`getopt he:c:r:n:t:d:s:w:o:f:p: $*`
 [ $? != 0 ] && usage
 set -- $args
 for arg
@@ -108,6 +110,10 @@ do
 		;;
 	-o)
 		OUT_DIR="$2"
+		shift 2
+		;;
+	-p)
+		PMEM2_INSTALL="$2"
 		shift 2
 		;;
 	--)
@@ -217,7 +223,7 @@ cat << EOF >> $CONTROL_FILE
 
 Package: librpmem
 Architecture: any
-Depends: libfabric (>= $LIBFABRIC_MIN_VERSION), \${shlibs:Depends}, \${misc:Depends}
+Depends: \${shlibs:Depends}, \${misc:Depends}
 Description: Persistent Memory remote access support library
  librpmem provides low-level support for remote access to persistent memory
  (pmem) utilizing RDMA-capable RNICs. The library can be used to replicate
@@ -246,9 +252,69 @@ Package: rpmemd
 Section: misc
 Architecture: any
 Priority: optional
-Depends: libfabric (>= $LIBFABRIC_MIN_VERSION), \${shlibs:Depends}, \${misc:Depends}
+Depends: \${shlibs:Depends}, \${misc:Depends}
 Description: rpmem daemon
- Daemon for Remote Persistent Memory support
+ Daemon for Remote Persistent Memory support.
+EOF
+}
+
+function libpmem2_install_triggers_overrides() {
+cat << EOF > debian/libpmem2.install
+$LIB_DIR/libpmem2.so.*
+EOF
+
+cat << EOF > debian/libpmem2.lintian-overrides
+$ITP_BUG_EXCUSE
+new-package-should-close-itp-bug
+libpmem2: package-name-doesnt-match-sonames
+EOF
+
+cat << EOF > debian/libpmem2-dev.install
+$LIB_DIR/pmdk_debug/libpmem2.a $LIB_DIR/pmdk_dbg/
+$LIB_DIR/pmdk_debug/libpmem2.so $LIB_DIR/pmdk_dbg/
+$LIB_DIR/pmdk_debug/libpmem2.so.* $LIB_DIR/pmdk_dbg/
+$LIB_DIR/libpmem2.so
+$LIB_DIR/pkgconfig/libpmem2.pc
+$INC_DIR/libpmem2.h
+$MAN7_DIR/libpmem2.7
+$MAN3_DIR/pmem2_*.3
+EOF
+
+cat << EOF > debian/libpmem2-dev.triggers
+interest man-db
+EOF
+
+cat << EOF > debian/libpmem2-dev.lintian-overrides
+$ITP_BUG_EXCUSE
+new-package-should-close-itp-bug
+# The following warnings are triggered by a bug in debhelper:
+# http://bugs.debian.org/204975
+postinst-has-useless-call-to-ldconfig
+postrm-has-useless-call-to-ldconfig
+# We do not want to compile with -O2 for debug version
+hardening-no-fortify-functions $LIB_DIR/pmdk_dbg/*
+EOF
+}
+
+function append_libpmem2_control() {
+cat << EOF >> $CONTROL_FILE
+
+Package: libpmem2
+Architecture: any
+Depends: \${shlibs:Depends}, \${misc:Depends}
+Description: Persistent Memory low level support library
+ libpmem2 provides low level persistent memory support. In particular, support
+ for the persistent memory instructions for flushing changes to pmem is
+ provided. (EXPERIMENTAL)
+
+Package: libpmem2-dev
+Section: libdevel
+Architecture: any
+Depends: libpmem2 (=\${binary:Version}), \${shlibs:Depends}, \${misc:Depends}
+Description: Development files for libpmem2
+ libpmem2 provides low level persistent memory support. In particular, support
+ for the persistent memory instructions for flushing changes to pmem is
+ provided. (EXPERIMENTAL)
 EOF
 }
 
@@ -276,9 +342,9 @@ Section: misc
 Architecture: any
 Priority: optional
 Depends: libpmem (=\${binary:Version}), \${shlibs:Depends}, \${misc:Depends}
-Description: daxio utility
- The daxio utility performs I/O on Device DAX devices or zero
- a Device DAX device.  Since the standard I/O APIs (read/write) cannot be used
+Description: dd-like tool to read/write to a devdax device
+ The daxio utility performs I/O on Device DAX devices or zeroes a Device
+ DAX device.  Since the standard I/O APIs (read/write) cannot be used
  with Device DAX, data transfer is performed on a memory-mapped device.
  The daxio may be used to dump Device DAX data to a file, restore data from
  a backup copy, move/copy data to another device or to erase data from
@@ -353,23 +419,6 @@ Priority: optional
 Standards-version: 4.1.4
 Build-Depends: debhelper (>= 9)
 Homepage: http://pmem.io/pmdk/
-
-Package: libpmem2
-Architecture: any
-Depends: \${shlibs:Depends}, \${misc:Depends}
-Description: Persistent Memory low level support library
- libpmem2 provides low level persistent memory support. In particular, support
- for the persistent memory instructions for flushing changes to pmem is
- provided. (EXPERIMENTAL)
-
-Package: libpmem2-dev
-Section: libdevel
-Architecture: any
-Depends: libpmem2 (=\${binary:Version}), \${shlibs:Depends}, \${misc:Depends}
-Description: Development files for libpmem2
- libpmem2 provides low level persistent memory support. In particular, support
- for the persistent memory instructions for flushing changes to pmem is
- provided. (EXPERIMENTAL)
 
 Package: libpmem
 Architecture: any
@@ -473,18 +522,21 @@ Section: misc
 Architecture: any
 Priority: optional
 Depends: \${shlibs:Depends}, \${misc:Depends}
-Description: Standalone utility for management and off-line analysis
- of Persistent Memory pools created by PMDK libraries. It provides a set
- of utilities for administration and diagnostics of Persistent Memory pools.
- Pmempool may be useful for troubleshooting by system administrators
- and users of the applications based on PMDK libraries.
+Description: utility for management and off-line analysis of PMDK memory pools
+ This utility is a standalone tool that manages Persistent Memory pools
+ created by PMDK libraries. It provides a set of utilities for
+ administration and diagnostics of Persistent Memory pools. Pmempool may be
+ useful for troubleshooting by system administrators and users of the
+ applications based on PMDK libraries.
 
 Package: pmreorder
 Section: misc
 Architecture: any
 Priority: optional
 Depends: \${shlibs:Depends}, \${misc:Depends}
-Description: Standalone tool which is a collection of python scripts designed
+Description: tool to parse and replay pmemcheck logs
+ Pmreorder is tool that parses and replays log of operations collected by
+ pmemcheck -- a  atandalone tool which is a collection of python scripts designed
  to parse and replay operations logged by pmemcheck - a persistent memory
  checking tool. Pmreorder performs the store reordering between persistent
  memory barriers - a sequence of flush-fence operations. It uses a
@@ -510,10 +562,10 @@ override_dh_strip:
 	dh_strip --dbg-package=$PACKAGE_NAME-dbg
 
 override_dh_auto_build:
-	dh_auto_build -- EXPERIMENTAL=${EXPERIMENTAL} prefix=/$PREFIX libdir=/$LIB_DIR includedir=/$INC_DIR docdir=/$DOC_DIR man1dir=/$MAN1_DIR man3dir=/$MAN3_DIR man5dir=/$MAN5_DIR man7dir=/$MAN7_DIR sysconfdir=/etc bashcompdir=/usr/share/bash-completion/completions NORPATH=1 ${pass_ndctl_enable} SRCVERSION=$SRCVERSION
+	dh_auto_build -- EXPERIMENTAL=${EXPERIMENTAL} prefix=/$PREFIX libdir=/$LIB_DIR includedir=/$INC_DIR docdir=/$DOC_DIR man1dir=/$MAN1_DIR man3dir=/$MAN3_DIR man5dir=/$MAN5_DIR man7dir=/$MAN7_DIR sysconfdir=/etc bashcompdir=/usr/share/bash-completion/completions NORPATH=1 ${pass_ndctl_enable} SRCVERSION=$SRCVERSION PMEM2_INSTALL=${PMEM2_INSTALL}
 
 override_dh_auto_install:
-	dh_auto_install -- EXPERIMENTAL=${EXPERIMENTAL} prefix=/$PREFIX libdir=/$LIB_DIR includedir=/$INC_DIR docdir=/$DOC_DIR man1dir=/$MAN1_DIR man3dir=/$MAN3_DIR man5dir=/$MAN5_DIR man7dir=/$MAN7_DIR sysconfdir=/etc bashcompdir=/usr/share/bash-completion/completions NORPATH=1 ${pass_ndctl_enable} SRCVERSION=$SRCVERSION
+	dh_auto_install -- EXPERIMENTAL=${EXPERIMENTAL} prefix=/$PREFIX libdir=/$LIB_DIR includedir=/$INC_DIR docdir=/$DOC_DIR man1dir=/$MAN1_DIR man3dir=/$MAN3_DIR man5dir=/$MAN5_DIR man7dir=/$MAN7_DIR sysconfdir=/etc bashcompdir=/usr/share/bash-completion/completions NORPATH=1 ${pass_ndctl_enable} SRCVERSION=$SRCVERSION PMEM2_INSTALL=${PMEM2_INSTALL}
 	find -path './debian/*usr/share/man/man*/*.gz' -exec gunzip {} \;
 
 override_dh_install:
@@ -768,6 +820,13 @@ then
 	rpmem_install_triggers_overrides;
 fi
 
+# libpmem2
+if [ "${PMEM2_INSTALL}" == "y" ]
+then
+	append_libpmem2_control;
+	libpmem2_install_triggers_overrides;
+fi
+
 # daxio
 if [ "${NDCTL_ENABLE}" != "n" ]
 then
@@ -793,7 +852,7 @@ debuild --preserve-envvar=EXTRA_CFLAGS_RELEASE \
 	--preserve-envvar=EXTRA_CXXFLAGS \
 	--preserve-envvar=EXTRA_LDFLAGS \
 	--preserve-envvar=NDCTL_ENABLE \
-	-us -uc
+	-us -uc -b
 
 cd $OLD_DIR
 

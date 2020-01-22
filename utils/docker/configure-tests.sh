@@ -103,7 +103,7 @@ else
 	echo "Skipping remote tests"
 	echo
 	echo "Removing all libfabric.pc files in order to simulate that libfabric is not installed:"
-	find /usr -name "libfabric.pc" 2>/dev/null
+	find /usr -name "libfabric.pc" 2>/dev/null || true
 	echo $USERPASS | sudo -S sh -c 'find /usr -name "libfabric.pc" -exec rm -f {} + 2>/dev/null'
 fi
 
@@ -111,16 +111,22 @@ fi
 	cat << EOF >> $WORKDIR/src/test/testconfig.py
 config = {
 	'unittest_log_level': 1,
-	'pmem_fs_dir': '/tmp',
-	'non_pmem_fs_dir': '/tmp',
+	'cacheline_fs_dir': '/tmp',
+	'force_cacheline': True,
+	'page_fs_dir': '/tmp',
+	'force_page': False,
+	'byte_fs_dir': '/tmp',
+	'force_byte': True,
 	'tm': True,
 	'test_type': 'check',
-	'fs': 'all',
+	'granularity': 'all',
 	'fs_dir_force_pmem': 0,
 	'keep_going': False,
 	'timeout': '3m',
 	'build': ['debug', 'release'],
 	'force_enable': None,
+	'device_dax_path': [],
+	'fail_on_skip': False
    }
 EOF
 

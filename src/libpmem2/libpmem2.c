@@ -1,5 +1,5 @@
 /*
- * Copyright 2019, Intel Corporation
+ * Copyright 2019-2020, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,16 +31,16 @@
  */
 
 /*
- * libpmem2.c -- pmem2 entry points for libpmem2
+ * libpmem2.c -- pmem2 library constructor & destructor
  */
-
-#include <stdio.h>
-#include <stdint.h>
 
 #include "libpmem2.h"
 
+#include "map.h"
+#include "out.h"
+#include "persist.h"
 #include "pmem2.h"
-#include "pmemcommon.h"
+#include "util.h"
 
 /*
  * libpmem2_init -- load-time initialization for libpmem2
@@ -56,7 +56,9 @@ libpmem2_init(void)
 			PMEM2_MAJOR_VERSION, PMEM2_MINOR_VERSION);
 
 	LOG(3, NULL);
-	/* XXX possible pmem2_init placeholder */
+
+	pmem2_map_init();
+	pmem2_persist_init();
 }
 
 /*
@@ -70,37 +72,6 @@ libpmem2_fini(void)
 {
 	LOG(3, NULL);
 
+	pmem2_map_fini();
 	out_fini();
 }
-
-/*
- * pmem2_errormsgU -- return last error message
- */
-#ifndef _WIN32
-static inline
-#endif
-const char *
-pmem2_errormsgU(void)
-{
-	return out_get_errormsg();
-}
-
-#ifndef _WIN32
-/*
- * pmem2_errormsg -- return last error message
- */
-const char *
-pmem2_errormsg(void)
-{
-	return pmem2_errormsgU();
-}
-#else
-/*
- * pmem2_errormsgW -- return last error message as wchar_t
- */
-const wchar_t *
-pmem2_errormsgW(void)
-{
-	return out_get_errormsgW();
-}
-#endif

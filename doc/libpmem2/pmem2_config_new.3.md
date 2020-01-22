@@ -34,7 +34,7 @@ date: pmem2 API version 1.0
 [comment]: <> ((INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE)
 [comment]: <> (OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.)
 
-[comment]: <> (pmem2_config_new.3 -- man page for pmem2_config_new and pmem2_config_delete
+[comment]: <> (pmem2_config_new.3 -- man page for pmem2_config_new and pmem2_config_delete)
 
 [NAME](#name)<br />
 [SYNOPSIS](#synopsis)<br />
@@ -80,5 +80,6 @@ Please see **libpmem2**(7) for detailed description of libpmem2 error codes.
 
 # SEE ALSO #
 
-**errno**(3), **pmem2_map**(3), _WINUX(=q=**pmem2_set_handle**(3), =e=)**pmem2_set_fd**(3), **libpmem2**(7)
-and **<http://pmem.io>**
+**errno**(3), **pmem2_map**(3), **pmem2_config_set_handle**(3),
+**pmem2_config_set_fd**(3), **pmem2_config_get_file_size**(3),
+**libpmem2**(7) and **<http://pmem.io>**
