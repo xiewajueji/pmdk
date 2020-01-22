@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright 2019, Intel Corporation
+# Copyright 2019-2020, Intel Corporation
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -60,19 +60,6 @@ git config --local user.email "pmem-bot@intel.com"
 git remote update
 git checkout -B ${TARGET_BRANCH} upstream/${TARGET_BRANCH}
 
-make doc
-
-# Build & PR groff
-git add -A
-git commit -m "doc: automatic $TARGET_BRANCH docs update" && true
-git push -f ${ORIGIN} ${TARGET_BRANCH}
-
-# Makes pull request.
-# When there is already an open PR or there are no changes an error is thrown, which we ignore.
-hub pull-request -f -b ${USER_NAME}:${TARGET_BRANCH} -h ${BOT_NAME}:${TARGET_BRANCH} -m "doc: automatic $TARGET_BRANCH docs update" && true
-
-git clean -dfx
-
 # Copy man & PR web md
 cd  ./doc
 make web
@@ -80,6 +67,7 @@ cd ..
 
 mv ./doc/web_linux ../
 mv ./doc/web_windows ../
+mv ./doc/generated/libs_map.yml ../
 
 # Checkout gh-pages and copy docs
 GH_PAGES_NAME="gh-pages-for-${TARGET_BRANCH}"
@@ -94,6 +82,11 @@ rsync -a ../web_windows/ ./manpages/windows/${VERSION}/ \
 
 rm -r ../web_linux
 rm -r ../web_windows
+
+if [ $TARGET_BRANCH = "master" ]; then
+	[ ! -d _data ] && mkdir _data
+	cp ../libs_map.yml _data
+fi
 
 # Add and push changes.
 # git commit command may fail if there is nothing to commit.

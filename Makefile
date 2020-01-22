@@ -1,5 +1,5 @@
 #
-# Copyright 2014-2019, Intel Corporation
+# Copyright 2014-2020, Intel Corporation
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -78,7 +78,7 @@ rpm : override DESTDIR="$(CURDIR)/$(RPM_BUILDDIR)"
 dpkg: override DESTDIR="$(CURDIR)/$(DPKG_BUILDDIR)"
 rpm dpkg: override prefix=/usr
 
-all:
+all: doc
 	$(MAKE) -C src $@
 
 doc:
@@ -110,7 +110,7 @@ test check pcheck pycheck: all
 	$(MAKE) -C src $@
 
 cstyle:
-	@utils/check-commit.sh
+	test -d .git && utils/check-commits.sh
 	$(MAKE) -C src $@
 	$(MAKE) -C utils $@
 	@echo Checking files for whitespace issues...

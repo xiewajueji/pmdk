@@ -670,7 +670,8 @@ list_insert(PMEMobjpool *pop,
 	list_fill_entry_redo_log(pop, ctx,
 			&args_common, next_offset, prev_offset, 1);
 
-	operation_finish(ctx);
+	operation_process(ctx);
+	operation_finish(ctx, 0);
 
 	pmemobj_mutex_unlock_nofail(pop, &head->lock);
 err:
@@ -821,7 +822,8 @@ list_remove(PMEMobjpool *pop,
 	list_fill_entry_redo_log(pop, ctx,
 			&args_common, 0, 0, 0);
 
-	operation_finish(ctx);
+	operation_process(ctx);
+	operation_finish(ctx, 0);
 
 	pmemobj_mutex_unlock_nofail(pop, &head->lock);
 err:
@@ -956,7 +958,8 @@ list_move(PMEMobjpool *pop,
 
 redo_last:
 unlock:
-	operation_finish(ctx);
+	operation_process(ctx);
+	operation_finish(ctx, 0);
 	list_mutexes_unlock(pop, head_new, head_old);
 err:
 	lane_release(pop);
