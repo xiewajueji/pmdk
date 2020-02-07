@@ -282,7 +282,7 @@ supports_map_sync(const char *path)
 	}
 
 	void *addr = mmap(NULL, size, PROT_READ|PROT_WRITE,
-		MAP_SHARED|MAP_SYNC|MAP_SHARED_VALIDATE, fd, 0);
+		MAP_SHARED|MAP_SYNC|MAP_SHARED, fd, 0);
 
 	if (addr != MAP_FAILED) {
 		ret = 1;
