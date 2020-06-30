@@ -175,7 +175,7 @@ util_map_sync(void *addr, size_t len, int proto, int flags, int fd,
 
 	/* MAP_SHARED */
 	void *ret = mmap(addr, len, proto,
-			flags | MAP_SHARED_VALIDATE | MAP_SYNC,
+			flags | MAP_SHARED | MAP_SYNC,
 			fd, offset);
 	if (ret != MAP_FAILED) {
 		LOG(4, "mmap with MAP_SYNC succeeded");

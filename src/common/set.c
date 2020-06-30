@@ -2648,7 +2648,17 @@ util_replica_map_local_addr(struct pool_set *set, unsigned repidx, int flags, vo
 
 		/* determine a hint address for mmap() */
 		if (addr == NULL) {
-			addr = util_map_hint(rep->resvsize, 0);
+			const char *addr_str = getenv("PMDK_MAP_ADDR_FORCE");
+			LOG(1, addr_str);
+			if (addr_str != NULL) {
+				uint64_t addr_converted =
+					strtoll(addr_str, NULL, 16);
+				addr = addr_converted == 0
+					? (void *)addr_converted
+					: util_map_hint(rep->resvsize, 0);
+			} else {
+				addr = util_map_hint(rep->resvsize, 0);
+			}
 		}
 		if (addr == MAP_FAILED) {
 			LOG(1, "cannot find a contiguous region of given size");
