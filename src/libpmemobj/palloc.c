@@ -1,34 +1,5 @@
-/*
- * Copyright 2015-2020, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2015-2020, Intel Corporation */
 
 /*
  * palloc.c -- implementation of pmalloc POSIX-like API
@@ -90,6 +61,7 @@ struct pobj_action_internal {
 		/* valid only when type == POBJ_ACTION_TYPE_HEAP */
 		struct {
 			uint64_t offset;
+			uint64_t usable_size;
 			enum memblock_state new_state;
 			struct memory_block m;
 			struct memory_block_reserved *mresv;
@@ -136,7 +108,7 @@ static int
 alloc_prep_block(struct palloc_heap *heap, const struct memory_block *m,
 	palloc_constr constructor, void *arg,
 	uint64_t extra_field, uint16_t object_flags,
-	uint64_t *offset_value)
+	struct pobj_action_internal *out)
 {
 	void *uptr = m->m_ops->get_user_data(m);
 	size_t usize = m->m_ops->get_user_size(m);
@@ -176,7 +148,8 @@ alloc_prep_block(struct palloc_heap *heap, const struct memory_block *m,
 	 * will be used to set the offset destination pointer provided by the
 	 * caller.
 	 */
-	*offset_value = HEAP_PTR_TO_OFF(heap, uptr);
+	out->offset = HEAP_PTR_TO_OFF(heap, uptr);
+	out->usable_size = usize;
 
 	return 0;
 }
@@ -247,7 +220,7 @@ palloc_reservation_create(struct palloc_heap *heap, size_t size,
 		goto out;
 
 	if (alloc_prep_block(heap, new_block, constructor, arg,
-		extra_field, object_flags, &out->offset) != 0) {
+		extra_field, object_flags, out) != 0) {
 		/*
 		 * Constructor returned non-zero value which means
 		 * the memory block reservation has to be rolled back.
@@ -423,12 +396,10 @@ palloc_heap_action_on_process(struct palloc_heap *heap,
 				act->m.m_ops->get_real_size(&act->m));
 		}
 	} else if (act->new_state == MEMBLOCK_FREE) {
-		if (On_valgrind) {
+		if (On_memcheck) {
 			void *ptr = act->m.m_ops->get_user_data(&act->m);
-			size_t size = act->m.m_ops->get_real_size(&act->m);
-
 			VALGRIND_DO_MEMPOOL_FREE(heap->layout, ptr);
-
+		} else if (On_pmemcheck) {
 			/*
 			 * The sync module, responsible for implementations of
 			 * persistent memory resident volatile variables,
@@ -441,6 +412,8 @@ palloc_heap_action_on_process(struct palloc_heap *heap,
 			 * that occur in newly allocated memory locations, that
 			 * once were occupied by a lock/volatile variable.
 			 */
+			void *ptr = act->m.m_ops->get_user_data(&act->m);
+			size_t size = act->m.m_ops->get_real_size(&act->m);
 			VALGRIND_REGISTER_PMEM_MAPPING(ptr, size);
 		}
 
@@ -842,6 +815,28 @@ palloc_pointer_compare(const void *lhs, const void *rhs)
 	return 0;
 }
 
+VEC(pobj_actions, struct pobj_action);
+
+/*
+ * pobj_actions_add -- add a new action to the end of the vector and return
+ *      its slot. Vector must be able to hold the new value. Reallocation is
+ *      forbidden.
+ */
+static struct pobj_action *
+pobj_actions_add(struct pobj_actions *actv)
+{
+	/*
+	 * This shouldn't happen unless there's a bug in the calculation
+	 * of the maximum number of actions.
+	 */
+	if (VEC_SIZE(actv) == VEC_CAPACITY(actv))
+		abort();
+
+	actv->size++;
+
+	return &VEC_BACK(actv);
+}
+
 /*
  * palloc_defrag -- forces recycling of all available memory, and reallocates
  *	provided objects so that they have the lowest possible address.
@@ -895,6 +890,9 @@ palloc_defrag(struct palloc_heap *heap, uint64_t **objv, size_t objcnt,
 			goto err_objvp;
 	}
 
+	if (current_object_sequence > longest_object_sequence)
+		longest_object_sequence = current_object_sequence;
+
 	heap_force_recycle(heap);
 
 	/*
@@ -905,7 +903,7 @@ palloc_defrag(struct palloc_heap *heap, uint64_t **objv, size_t objcnt,
 		LANE_REDO_EXTERNAL_SIZE / sizeof(struct ulog_entry_val)
 		- actions_per_realloc;
 
-	VEC(, struct pobj_action) actv;
+	struct pobj_actions actv;
 	VEC_INIT(&actv);
 
 	/*
@@ -921,6 +919,11 @@ palloc_defrag(struct palloc_heap *heap, uint64_t **objv, size_t objcnt,
 
 	if (VEC_RESERVE(&actv, actv_required_capacity) != 0)
 		goto err;
+
+	/*
+	 * Do NOT reallocate action vector after this line, because
+	 * prev_reserve can point to the slot in the original vector.
+	 */
 
 	struct pobj_action *prev_reserve = NULL;
 	uint64_t prev_offset = 0;
@@ -977,8 +980,7 @@ palloc_defrag(struct palloc_heap *heap, uint64_t **objv, size_t objcnt,
 		 * the pointer to the new offset.
 		 */
 		if (prev_reserve && prev_offset == offset) {
-			VEC_INC_BACK(&actv);
-			struct pobj_action *set = &VEC_BACK(&actv);
+			struct pobj_action *set = pobj_actions_add(&actv);
 
 			palloc_set_value(heap, set,
 				offsetp, prev_reserve->heap.offset);
@@ -1033,8 +1035,7 @@ palloc_defrag(struct palloc_heap *heap, uint64_t **objv, size_t objcnt,
 
 		size_t user_size = m.m_ops->get_user_size(&m);
 
-		VEC_INC_BACK(&actv);
-		struct pobj_action *reserve = &VEC_BACK(&actv);
+		struct pobj_action *reserve = pobj_actions_add(&actv);
 
 		if (palloc_reservation_create(heap, user_size,
 		    NULL, NULL,
@@ -1046,19 +1047,6 @@ palloc_defrag(struct palloc_heap *heap, uint64_t **objv, size_t objcnt,
 		}
 
 		uint64_t new_offset = reserve->heap.offset;
-
-		struct memory_block nm = memblock_from_offset(heap, new_offset);
-
-		mlock = nm.m_ops->get_lock(&nm);
-		os_mutex_lock(mlock);
-		unsigned new_fillpct = nm.m_ops->fill_pct(&nm);
-		os_mutex_unlock(mlock);
-
-		if (original_fillpct > new_fillpct) {
-			palloc_cancel(heap, reserve, 1);
-			VEC_POP_BACK(&actv);
-			continue;
-		}
 
 		VALGRIND_ADD_TO_TX(
 			HEAP_OFF_TO_PTR(heap, new_offset),
@@ -1104,8 +1092,7 @@ palloc_defrag(struct palloc_heap *heap, uint64_t **objv, size_t objcnt,
 		}
 		offsetp = objv[i];
 
-		VEC_INC_BACK(&actv);
-		struct pobj_action *set = &VEC_BACK(&actv);
+		struct pobj_action *set = pobj_actions_add(&actv);
 
 		/*
 		 * We need to change the pointer in the tree to the pointer
@@ -1125,8 +1112,7 @@ palloc_defrag(struct palloc_heap *heap, uint64_t **objv, size_t objcnt,
 		if (ravl_emplace_copy(objvp, &e) != 0)
 			goto err;
 
-		VEC_INC_BACK(&actv);
-		struct pobj_action *dfree = &VEC_BACK(&actv);
+		struct pobj_action *dfree = pobj_actions_add(&actv);
 
 		palloc_defer_free(heap, offset, dfree);
 

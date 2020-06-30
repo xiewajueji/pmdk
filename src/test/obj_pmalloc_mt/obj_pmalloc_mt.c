@@ -1,34 +1,5 @@
-/*
- * Copyright 2015-2019, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2015-2020, Intel Corporation */
 
 /*
  * obj_pmalloc_mt.c -- multithreaded test of allocator
@@ -38,6 +9,7 @@
 #include "file.h"
 #include "obj.h"
 #include "pmalloc.h"
+#include "sys_util.h"
 #include "unittest.h"
 
 #define MAX_THREADS 32
@@ -320,10 +292,10 @@ actions_clear(PMEMobjpool *pop, struct root *r)
 	for (unsigned i = 0; i < Threads; ++i) {
 		for (unsigned j = 0; j < Ops_per_thread; ++j) {
 			struct action *a = &r->actions[i][j];
-			os_mutex_destroy(&a->lock);
-			os_mutex_init(&a->lock);
-			os_cond_destroy(&a->cond);
-			os_cond_init(&a->cond);
+			util_mutex_destroy(&a->lock);
+			util_mutex_init(&a->lock);
+			util_cond_destroy(&a->cond);
+			util_cond_init(&a->cond);
 			memset(&a->pact, 0, sizeof(a->pact));
 			pmemobj_persist(pop, a, sizeof(*a));
 		}
@@ -336,10 +308,10 @@ run_worker(void *(worker_func)(void *arg), struct worker_args args[])
 	os_thread_t t[MAX_THREADS];
 
 	for (unsigned i = 0; i < Threads; ++i)
-		os_thread_create(&t[i], NULL, worker_func, &args[i]);
+		THREAD_CREATE(&t[i], NULL, worker_func, &args[i]);
 
 	for (unsigned i = 0; i < Threads; ++i)
-		os_thread_join(&t[i], NULL);
+		THREAD_JOIN(&t[i], NULL);
 }
 
 int
@@ -390,8 +362,8 @@ main(int argc, char *argv[])
 		args[i].idx = i;
 		for (unsigned j = 0; j < Ops_per_thread; ++j) {
 			struct action *a = &r->actions[i][j];
-			os_mutex_init(&a->lock);
-			os_cond_init(&a->cond);
+			util_mutex_init(&a->lock);
+			util_cond_init(&a->cond);
 		}
 	}
 

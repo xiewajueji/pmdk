@@ -1,33 +1,5 @@
-#
-# Copyright 2019, Intel Corporation
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-#
-#     * Redistributions of source code must retain the above copyright
-#       notice, this list of conditions and the following disclaimer.
-#
-#     * Redistributions in binary form must reproduce the above copyright
-#       notice, this list of conditions and the following disclaimer in
-#       the documentation and/or other materials provided with the
-#       distribution.
-#
-#     * Neither the name of the copyright holder nor the names of its
-#       contributors may be used to endorse or promote products derived
-#       from this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright 2019-2020, Intel Corporation
 #
 """Set of classes that represent the context of single test execution"""
 
@@ -38,6 +10,8 @@ import itertools
 import shutil
 import subprocess as sp
 import collections
+import contextlib
+from inspect import ismethod
 
 import configurator
 import futils
@@ -56,7 +30,7 @@ try:
     envconfig = envconfig.config
 except ImportError:
     # if file doesn't exist create dummy object
-    envconfig = {'GLOBAL_LIB_PATH': ''}
+    envconfig = {'GLOBAL_LIB_PATH': '', 'PMEM2_AVX512F_ENABLED': ''}
 
 
 def expand(*classes):
@@ -66,6 +40,7 @@ def expand(*classes):
 
 class ContextBase:
     """Context basic interface and low-level utilities"""
+
     def __init__(self, build, *args, **kwargs):
         self._elems = []
         self._env = {}
@@ -81,7 +56,7 @@ class ContextBase:
         # context attribute with its key assigned as an attribute name.
         for k, v in kwargs.items():
             self.add_ctx_elem(v)
-            setattr(self, '{}'.format(k), v)
+            setattr(self, str(k), v)
 
     def __getattr__(self, name):
         """
@@ -124,7 +99,10 @@ class ContextBase:
         with element's environment variables (if present)
         """
         self._elems.append(elem)
-        setattr(self, str(elem), elem)
+        if hasattr(elem, 'name'):
+            setattr(self, elem.name, elem)
+        else:
+            setattr(self, str(elem), elem)
 
         if hasattr(elem, 'env'):
             self.add_env(elem.env)
@@ -146,10 +124,8 @@ class ContextBase:
         """
         kwargs['tools'] = self.tools
         for e in self._elems:
-            try:
+            with contextlib.suppress(AttributeError):
                 e.setup(*args, **kwargs)
-            except AttributeError:
-                pass
 
     def check(self, *args, **kwargs):
         """
@@ -158,10 +134,8 @@ class ContextBase:
         """
         kwargs['tools'] = self.tools
         for e in self._elems:
-            try:
+            with contextlib.suppress(AttributeError):
                 e.check(*args, **kwargs)
-            except AttributeError:
-                pass
 
     def clean(self, *args, **kwargs):
         """
@@ -170,10 +144,8 @@ class ContextBase:
         """
         kwargs['tools'] = self.tools
         for e in self._elems:
-            try:
+            with contextlib.suppress(AttributeError):
                 e.clean(*args, **kwargs)
-            except AttributeError:
-                pass
 
     @property
     def env(self):
@@ -247,9 +219,9 @@ class ContextBase:
         futils.fail('Could not get size of the file, '
                     'it is inaccessible or does not exist')
 
-    def get_free_space(self):
+    def get_free_space(self, dir="."):
         """Returns free space for current file system"""
-        _, _, free = shutil.disk_usage(".")
+        _, _, free = shutil.disk_usage(dir)
         return free
 
 
@@ -264,7 +236,8 @@ class Context(ContextBase):
     def new_poolset(self, path):
         return _Poolset(path, self)
 
-    def exec(self, cmd, *args, expected_exitcode=0):
+    def exec(self, cmd, *args, expected_exitcode=0, stderr_file=None,
+             stdout_file=None):
         """Execute binary in current test context"""
 
         tmp = self._env.copy()
@@ -282,7 +255,9 @@ class Context(ContextBase):
             if self.valgrind:
                 cmd = self.valgrind.cmd + cmd
 
-        cmd = cmd + list(args)
+        # cast all provided args to strings (required by subprocess run())
+        # so that exec() can accept args of any printable type
+        cmd.extend([str(a) for a in args])
 
         if self.conf.tracer:
             cmd = shlex.split(self.conf.tracer) + cmd
@@ -291,13 +266,30 @@ class Context(ContextBase):
             # tracer command in an interactive session
             proc = sp.run(cmd, env=tmp, cwd=self.cwd)
         else:
-            proc = sp.run(cmd, env=tmp, cwd=self.cwd,
-                          timeout=self.conf.timeout, stdout=sp.PIPE,
-                          stderr=sp.STDOUT, universal_newlines=True)
+            if stderr_file:
+                f = open(os.path.join(self.cwd, stderr_file), 'w')
+
+            # let's create a dictionary of arguments to the run func
+            run_kwargs = {
+                'env': tmp,
+                'cwd': self.cwd,
+                'timeout': self.conf.timeout,
+                'stdout': sp.PIPE,
+                'universal_newlines': True,
+                'stderr': sp.STDOUT if stderr_file is None else f}
+
+            proc = sp.run(cmd, **run_kwargs)
+
+            if stderr_file:
+                f.close()
 
         if expected_exitcode is not None and \
            proc.returncode != expected_exitcode:
             futils.fail(proc.stdout, exit_code=proc.returncode)
+
+        if stdout_file is not None:
+            with open(os.path.join(self.cwd, stdout_file), 'w') as f:
+                f.write(proc.stdout)
 
         self.msg.print_verbose(proc.stdout)
 
@@ -333,6 +325,11 @@ class Context(ContextBase):
         if mode is not None:
             os.chmod(filepath, mode)
         return filepath
+
+    def require_free_space(self, space):
+        if self.get_free_space(self.testdir) < space:
+            futils.skip('Not enough free space ({} MiB required)'
+                        .format(space / MiB))
 
     def mkdirs(self, path, mode=None):
         """
@@ -446,6 +443,72 @@ def get_requirement(tc, attr, default):
     return ret_val, ret_kwargs
 
 
+class TestParam:
+    """
+    TestParam manages single test parameter provided to test with add_params()
+    decorator.
+    Test parameters are added to context class as its elements - therefore the
+    'value' object may implement setup(), check() and clean() which will be
+    delegated to by TestParam class if context setup(), check() and
+    clean() methods are called.
+    """
+    def __init__(self, name, value):
+        self.name = name
+        self.value = value
+
+    def __str__(self):
+        return '{}: {}'.format(self.name, self.value)
+
+    def __call__(self):
+        return self.value
+
+    def setup(self, **kwargs):
+        if hasattr(self.value, 'setup') and ismethod(self.value.setup):
+            self.value.setup(**kwargs)
+
+    def check(self, **kwargs):
+        if hasattr(self.value, 'check') and ismethod(self.value.check):
+            self.value.check(**kwargs)
+
+    def clean(self, **kwargs):
+        if hasattr(self.value, 'clean') and ismethod(self.value.clean):
+            self.value.clean(**kwargs)
+
+
+PARAMS_ATTR = '_params_'
+
+
+def add_params(name, values):
+    """
+    Add parameters to test case.
+
+    Parameters will be accessible from test through context 'name' attribute.
+    The value of single parameter can be accessed by calling this attribute,
+    e.g. for:
+    add_params('param', params_list)
+    single parameter provided within 'params_list' is accessible through:
+    ctx.param()
+    """
+    params = [TestParam(name, v) for v in values]
+
+    def wrapped(tc):
+        if hasattr(tc, PARAMS_ATTR):
+            getattr(tc, PARAMS_ATTR).update({name: params})
+        else:
+            setattr(tc, PARAMS_ATTR, {name: params})
+        return tc
+
+    return wrapped
+
+
+def get_params(tc):
+    """Get parameters added to test case"""
+    try:
+        return getattr(tc, PARAMS_ATTR)
+    except AttributeError:
+        return {}
+
+
 class Any:
     """
     The test context attribute signifying that specific context value is not
@@ -476,6 +539,7 @@ class _NoContext(collections.UserList):
     its items are not required during test execution
     (e. g. no dax devices required by test)
     """
+
     def __init__(self):
         self.data = []
         self.data.append(False)

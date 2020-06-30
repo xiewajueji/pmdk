@@ -1,34 +1,5 @@
-/*
- * Copyright 2019-2020, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2019-2020, Intel Corporation */
 
 /*
  * pmem2_granularity.c -- test for graunlarity functionality
@@ -39,6 +10,7 @@
 #include <string.h>
 
 #include "config.h"
+#include "source.h"
 #include "pmem2_granularity.h"
 #include "unittest.h"
 #include "ut_pmem2_config.h"
@@ -117,24 +89,22 @@ init_test(char *file, struct test_ctx *ctx,
  * init_cfg -- initialize basic pmem2 config
  */
 static void
-init_cfg(struct pmem2_config *cfg, struct test_ctx *ctx)
+init_cfg(struct pmem2_config *cfg,
+	struct pmem2_source **src, struct test_ctx *ctx)
 {
 	pmem2_config_init(cfg);
-#ifdef _WIN32
-	cfg->handle = (HANDLE)_get_osfhandle(ctx->fd);
-#else
-	cfg->fd = ctx->fd;
-#endif
+	int ret = pmem2_source_from_fd(src, ctx->fd);
+	UT_PMEM2_EXPECT_RETURN(ret, 0);
 }
 
 /*
  * cleanup -- cleanup the environment after test
  */
 static void
-cleanup(struct pmem2_config *cfg, struct test_ctx *ctx)
+cleanup(struct pmem2_source *src, struct test_ctx *ctx)
 {
 #ifdef _WIN32
-	CloseHandle(cfg->handle);
+	CloseHandle(src->value.handle);
 #else
 	CLOSE(ctx->fd);
 #endif
@@ -146,12 +116,12 @@ cleanup(struct pmem2_config *cfg, struct test_ctx *ctx)
  */
 static void
 map_with_available_granularity(struct pmem2_config *cfg,
-		struct test_ctx *ctx)
+	struct pmem2_source *src, struct test_ctx *ctx)
 {
 	cfg->requested_max_granularity = ctx->requested_granularity;
 
 	struct pmem2_map *map;
-	int ret = pmem2_map(cfg, &map);
+	int ret = pmem2_map(cfg, src, &map);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 	UT_ASSERTne(map, NULL);
 	UT_ASSERTeq(ctx->expected_granularity,
@@ -167,18 +137,19 @@ map_with_available_granularity(struct pmem2_config *cfg,
  */
 static void
 map_with_unavailable_granularity(struct pmem2_config *cfg,
-	struct test_ctx *ctx)
+	struct pmem2_source *src, struct test_ctx *ctx)
 {
 	cfg->requested_max_granularity = ctx->requested_granularity;
 
 	struct pmem2_map *map;
-	int ret = pmem2_map(cfg, &map);
+	int ret = pmem2_map(cfg, src, &map);
 	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_GRANULARITY_NOT_SUPPORTED);
 	UT_ERR("%s", pmem2_errormsg());
 	UT_ASSERTeq(map, NULL);
 }
 
-typedef void(*map_func)(struct pmem2_config *cfg, struct test_ctx *ctx);
+typedef void(*map_func)(struct pmem2_config *cfg,
+	struct pmem2_source *src, struct test_ctx *ctx);
 
 /*
  * granularity_template -- template for testing granularity in pmem2
@@ -194,11 +165,13 @@ granularity_template(const struct test_case *tc, int argc, char *argv[],
 	init_test(file, &ctx, granularity);
 
 	struct pmem2_config cfg;
-	init_cfg(&cfg, &ctx);
+	struct pmem2_source *src;
+	init_cfg(&cfg, &src, &ctx);
 
-	map_do(&cfg, &ctx);
+	map_do(&cfg, src, &ctx);
 
-	cleanup(&cfg, &ctx);
+	cleanup(src, &ctx);
+	pmem2_source_delete(&src);
 
 	return ret;
 }

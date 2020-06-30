@@ -1,34 +1,5 @@
-/*
- * Copyright 2019-2020, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2019-2020, Intel Corporation */
 
 /*
  * persist.c -- pmem2_get_[persist|flush|drain]_fn
@@ -40,11 +11,58 @@
 #include "libpmem2.h"
 #include "map.h"
 #include "out.h"
+#include "os.h"
 #include "persist.h"
+#include "deep_flush.h"
 #include "pmem2_arch.h"
+#include "pmem2_utils.h"
 #include "valgrind_internal.h"
 
 static struct pmem2_arch_info Info;
+
+/*
+ * memmove_nodrain_libc -- (internal) memmove to pmem using libc
+ */
+static void *
+memmove_nodrain_libc(void *pmemdest, const void *src, size_t len,
+		unsigned flags, flush_func flush)
+{
+#ifdef DEBUG
+	if (flags & ~PMEM2_F_MEM_VALID_FLAGS)
+		ERR("invalid flags 0x%x", flags);
+#endif
+	LOG(15, "pmemdest %p src %p len %zu flags 0x%x", pmemdest, src, len,
+			flags);
+
+	memmove(pmemdest, src, len);
+
+	if (!(flags & PMEM2_F_MEM_NOFLUSH))
+		flush(pmemdest, len);
+
+	return pmemdest;
+}
+
+/*
+ * memset_nodrain_libc -- (internal) memset to pmem using libc
+ */
+static void *
+memset_nodrain_libc(void *pmemdest, int c, size_t len, unsigned flags,
+		flush_func flush)
+{
+#ifdef DEBUG
+	if (flags & ~PMEM2_F_MEM_VALID_FLAGS)
+		ERR("invalid flags 0x%x", flags);
+#endif
+	LOG(15, "pmemdest %p c 0x%x len %zu flags 0x%x", pmemdest, c, len,
+			flags);
+
+	memset(pmemdest, c, len);
+
+	if (!(flags & PMEM2_F_MEM_NOFLUSH))
+		flush(pmemdest, len);
+
+	return pmemdest;
+}
 
 /*
  * pmem2_persist_init -- initialize persist module
@@ -54,11 +72,42 @@ pmem2_persist_init(void)
 {
 	Info.memmove_nodrain = NULL;
 	Info.memset_nodrain = NULL;
+	Info.memmove_nodrain_eadr = NULL;
+	Info.memset_nodrain_eadr = NULL;
 	Info.flush = NULL;
 	Info.fence = NULL;
 	Info.flush_has_builtin_fence = 0;
 
 	pmem2_arch_init(&Info);
+
+	char *ptr = os_getenv("PMEM_NO_GENERIC_MEMCPY");
+	long long no_generic = 0;
+	if (ptr)
+		no_generic = atoll(ptr);
+
+	if (Info.memmove_nodrain == NULL) {
+		if (no_generic) {
+			Info.memmove_nodrain = memmove_nodrain_libc;
+			Info.memmove_nodrain_eadr = memmove_nodrain_libc;
+			LOG(3, "using libc memmove");
+		} else {
+			Info.memmove_nodrain = memmove_nodrain_generic;
+			Info.memmove_nodrain_eadr = memmove_nodrain_generic;
+			LOG(3, "using generic memmove");
+		}
+	}
+
+	if (Info.memset_nodrain == NULL) {
+		if (no_generic) {
+			Info.memset_nodrain = memset_nodrain_libc;
+			Info.memset_nodrain_eadr = memset_nodrain_libc;
+			LOG(3, "using libc memset");
+		} else {
+			Info.memset_nodrain = memset_nodrain_generic;
+			Info.memset_nodrain_eadr = memset_nodrain_generic;
+			LOG(3, "using generic memset");
+		}
+	}
 }
 
 /*
@@ -238,6 +287,77 @@ pmem2_drain_nop(void)
 }
 
 /*
+ * pmem2_deep_flush_page -- do nothing - pmem2_persist_fn already did msync
+ */
+int
+pmem2_deep_flush_page(struct pmem2_map *map, void *ptr, size_t size)
+{
+	LOG(3, "map %p ptr %p size %zu", map, ptr, size);
+	return 0;
+}
+
+/*
+ * pmem2_deep_flush_cache -- flush buffers for fsdax or write
+ * to deep_flush for DevDax
+ */
+int
+pmem2_deep_flush_cache(struct pmem2_map *map, void *ptr, size_t size)
+{
+	LOG(3, "map %p ptr %p size %zu", map, ptr, size);
+
+	enum pmem2_file_type type = map->source.value.ftype;
+
+	/*
+	 * XXX: this should be moved to pmem2_deep_flush_dax
+	 * while refactoring abstraction
+	 */
+	if (type == PMEM2_FTYPE_DEVDAX)
+		pmem2_persist_cpu_cache(ptr, size);
+
+	int ret = pmem2_deep_flush_dax(map, ptr, size);
+	if (ret < 0) {
+		LOG(1, "cannot perform deep flush cache for map %p", map);
+		return ret;
+	}
+
+	return 0;
+}
+
+/*
+ * pmem2_deep_flush_byte -- flush cpu cache and perform deep flush for dax
+ */
+int
+pmem2_deep_flush_byte(struct pmem2_map *map, void *ptr, size_t size)
+{
+	LOG(3, "map %p ptr %p size %zu", map, ptr, size);
+
+	if (map->source.type == PMEM2_SOURCE_ANON) {
+		ERR("Anonymous source does not support deep flush");
+		return PMEM2_E_NOSUPP;
+	}
+
+	ASSERT(map->source.type == PMEM2_SOURCE_FD ||
+		map->source.type == PMEM2_SOURCE_HANDLE);
+
+	enum pmem2_file_type type = map->source.value.ftype;
+
+	/*
+	 * XXX: this should be moved to pmem2_deep_flush_dax
+	 * while refactoring abstraction
+	 */
+	if (type == PMEM2_FTYPE_DEVDAX)
+		pmem2_persist_cpu_cache(ptr, size);
+
+	int ret = pmem2_deep_flush_dax(map, ptr, size);
+	if (ret < 0) {
+		LOG(1, "cannot perform deep flush byte for map %p", map);
+		return ret;
+	}
+
+	return 0;
+}
+
+/*
  * pmem2_set_flush_fns -- set function pointers related to flushing
  */
 void
@@ -248,16 +368,19 @@ pmem2_set_flush_fns(struct pmem2_map *map)
 			map->persist_fn = pmem2_persist_pages;
 			map->flush_fn = pmem2_persist_pages;
 			map->drain_fn = pmem2_drain_nop;
+			map->deep_flush_fn = pmem2_deep_flush_page;
 			break;
 		case PMEM2_GRANULARITY_CACHE_LINE:
 			map->persist_fn = pmem2_persist_cpu_cache;
 			map->flush_fn = pmem2_flush_cpu_cache;
 			map->drain_fn = pmem2_drain;
+			map->deep_flush_fn = pmem2_deep_flush_cache;
 			break;
 		case PMEM2_GRANULARITY_BYTE:
 			map->persist_fn = pmem2_persist_noflush;
 			map->flush_fn = pmem2_flush_nop;
 			map->drain_fn = pmem2_drain;
+			map->deep_flush_fn = pmem2_deep_flush_byte;
 			break;
 		default:
 			abort();
@@ -294,3 +417,188 @@ pmem2_get_drain_fn(struct pmem2_map *map)
 {
 	return map->drain_fn;
 }
+
+/*
+ * pmem2_memmove_nonpmem -- mem[move|cpy] followed by an msync
+ */
+static void *
+pmem2_memmove_nonpmem(void *pmemdest, const void *src, size_t len,
+		unsigned flags)
+{
+#ifdef DEBUG
+	if (flags & ~PMEM2_F_MEM_VALID_FLAGS)
+		ERR("invalid flags 0x%x", flags);
+#endif
+	PMEM2_API_START("pmem2_memmove");
+	Info.memmove_nodrain(pmemdest, src, len, flags & ~PMEM2_F_MEM_NODRAIN,
+			Info.flush);
+
+	pmem2_persist_pages(pmemdest, len);
+
+	PMEM2_API_END("pmem2_memmove");
+	return pmemdest;
+}
+
+/*
+ * pmem2_memset_nonpmem -- memset followed by an msync
+ */
+static void *
+pmem2_memset_nonpmem(void *pmemdest, int c, size_t len, unsigned flags)
+{
+#ifdef DEBUG
+	if (flags & ~PMEM2_F_MEM_VALID_FLAGS)
+		ERR("invalid flags 0x%x", flags);
+#endif
+	PMEM2_API_START("pmem2_memset");
+	Info.memset_nodrain(pmemdest, c, len, flags & ~PMEM2_F_MEM_NODRAIN,
+			Info.flush);
+
+	pmem2_persist_pages(pmemdest, len);
+
+	PMEM2_API_END("pmem2_memset");
+	return pmemdest;
+}
+
+/*
+ * pmem2_memmove -- mem[move|cpy] to pmem
+ */
+static void *
+pmem2_memmove(void *pmemdest, const void *src, size_t len,
+		unsigned flags)
+{
+#ifdef DEBUG
+	if (flags & ~PMEM2_F_MEM_VALID_FLAGS)
+		ERR("invalid flags 0x%x", flags);
+#endif
+	PMEM2_API_START("pmem2_memmove");
+	Info.memmove_nodrain(pmemdest, src, len, flags, Info.flush);
+	if ((flags & (PMEM2_F_MEM_NODRAIN | PMEM2_F_MEM_NOFLUSH)) == 0)
+		pmem2_drain();
+
+	PMEM2_API_END("pmem2_memmove");
+	return pmemdest;
+}
+
+/*
+ * pmem2_memset -- memset to pmem
+ */
+static void *
+pmem2_memset(void *pmemdest, int c, size_t len, unsigned flags)
+{
+#ifdef DEBUG
+	if (flags & ~PMEM2_F_MEM_VALID_FLAGS)
+		ERR("invalid flags 0x%x", flags);
+#endif
+	PMEM2_API_START("pmem2_memset");
+	Info.memset_nodrain(pmemdest, c, len, flags, Info.flush);
+	if ((flags & (PMEM2_F_MEM_NODRAIN | PMEM2_F_MEM_NOFLUSH)) == 0)
+		pmem2_drain();
+
+	PMEM2_API_END("pmem2_memset");
+	return pmemdest;
+}
+
+/*
+ * pmem2_memmove_eadr -- mem[move|cpy] to pmem, platform supports eADR
+ */
+static void *
+pmem2_memmove_eadr(void *pmemdest, const void *src, size_t len,
+		unsigned flags)
+{
+#ifdef DEBUG
+	if (flags & ~PMEM2_F_MEM_VALID_FLAGS)
+		ERR("invalid flags 0x%x", flags);
+#endif
+	PMEM2_API_START("pmem2_memmove");
+	Info.memmove_nodrain_eadr(pmemdest, src, len, flags, Info.flush);
+	if ((flags & (PMEM2_F_MEM_NODRAIN | PMEM2_F_MEM_NOFLUSH)) == 0)
+		pmem2_drain();
+
+	PMEM2_API_END("pmem2_memmove");
+	return pmemdest;
+}
+
+/*
+ * pmem2_memset_eadr -- memset to pmem, platform supports eADR
+ */
+static void *
+pmem2_memset_eadr(void *pmemdest, int c, size_t len, unsigned flags)
+{
+#ifdef DEBUG
+	if (flags & ~PMEM2_F_MEM_VALID_FLAGS)
+		ERR("invalid flags 0x%x", flags);
+#endif
+	PMEM2_API_START("pmem2_memset");
+	Info.memset_nodrain_eadr(pmemdest, c, len, flags, Info.flush);
+	if ((flags & (PMEM2_F_MEM_NODRAIN | PMEM2_F_MEM_NOFLUSH)) == 0)
+		pmem2_drain();
+
+	PMEM2_API_END("pmem2_memset");
+	return pmemdest;
+}
+
+/*
+ * pmem2_set_mem_fns -- set function pointers related to mem[move|cpy|set]
+ */
+void
+pmem2_set_mem_fns(struct pmem2_map *map)
+{
+	switch (map->effective_granularity) {
+		case PMEM2_GRANULARITY_PAGE:
+			map->memmove_fn = pmem2_memmove_nonpmem;
+			map->memcpy_fn = pmem2_memmove_nonpmem;
+			map->memset_fn = pmem2_memset_nonpmem;
+			break;
+		case PMEM2_GRANULARITY_CACHE_LINE:
+			map->memmove_fn = pmem2_memmove;
+			map->memcpy_fn = pmem2_memmove;
+			map->memset_fn = pmem2_memset;
+			break;
+		case PMEM2_GRANULARITY_BYTE:
+			map->memmove_fn = pmem2_memmove_eadr;
+			map->memcpy_fn = pmem2_memmove_eadr;
+			map->memset_fn = pmem2_memset_eadr;
+			break;
+		default:
+			abort();
+	}
+
+}
+
+/*
+ * pmem2_get_memmove_fn - return a pointer to a function
+ */
+pmem2_memmove_fn
+pmem2_get_memmove_fn(struct pmem2_map *map)
+{
+	return map->memmove_fn;
+}
+
+/*
+ * pmem2_get_memcpy_fn - return a pointer to a function
+ */
+pmem2_memcpy_fn
+pmem2_get_memcpy_fn(struct pmem2_map *map)
+{
+	return map->memcpy_fn;
+}
+
+/*
+ * pmem2_get_memset_fn - return a pointer to a function
+ */
+pmem2_memset_fn
+pmem2_get_memset_fn(struct pmem2_map *map)
+{
+	return map->memset_fn;
+}
+
+#if VG_PMEMCHECK_ENABLED
+/*
+ * pmem2_emit_log -- logs library and function names to pmemcheck store log
+ */
+void
+pmem2_emit_log(const char *func, int order)
+{
+	util_emit_log("libpmem2", func, order);
+}
+#endif

@@ -1,34 +1,5 @@
-/*
- * Copyright 2019-2020, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2019-2020, Intel Corporation */
 
 /*
  * map_windows.c -- pmem2_map (Windows)
@@ -45,6 +16,7 @@
 #include "out.h"
 #include "persist.h"
 #include "pmem2_utils.h"
+#include "source.h"
 #include "util.h"
 
 #define HIDWORD(x) ((DWORD)((x) >> 32))
@@ -131,19 +103,14 @@ is_direct_access(HANDLE fh)
  * pmem2_map -- map memory according to provided config
  */
 int
-pmem2_map(const struct pmem2_config *cfg, struct pmem2_map **map_ptr)
+pmem2_map(const struct pmem2_config *cfg, const struct pmem2_source *src,
+	struct pmem2_map **map_ptr)
 {
-	LOG(3, "cfg %p map_ptr %p", cfg, map_ptr);
-
+	LOG(3, "cfg %p src %p map_ptr %p", cfg, src, map_ptr);
 	int ret = 0;
 	unsigned long err = 0;
 	size_t file_size;
 	*map_ptr = NULL;
-
-	if (cfg->handle == INVALID_HANDLE_VALUE) {
-		ERR("file handle was not set");
-		return PMEM2_E_FILE_HANDLE_NOT_SET;
-	}
 
 	if ((int)cfg->requested_max_granularity == PMEM2_GRANULARITY_INVALID) {
 		ERR(
@@ -152,56 +119,136 @@ pmem2_map(const struct pmem2_config *cfg, struct pmem2_map **map_ptr)
 		return PMEM2_E_GRANULARITY_NOT_SET;
 	}
 
-	ret = pmem2_config_get_file_size(cfg, &file_size);
+	ret = pmem2_source_size(src, &file_size);
+	if (ret)
+		return ret;
+
+	size_t src_alignment;
+	ret = pmem2_source_alignment(src, &src_alignment);
 	if (ret)
 		return ret;
 
 	size_t length;
-	ret = pmem2_config_validate_length(cfg, file_size);
+	ret = pmem2_config_validate_length(cfg, file_size, src_alignment);
 	if (ret)
 		return ret;
+
+	size_t effective_offset;
+	ret = pmem2_validate_offset(cfg, &effective_offset, src_alignment);
+	if (ret)
+		return ret;
+
+	if (src->type == PMEM2_SOURCE_ANON)
+		effective_offset = 0;
 
 	/* without user-provided length, map to the end of the file */
 	if (cfg->length)
 		length = cfg->length;
 	else
-		length = file_size - cfg->offset;
+		length = file_size - effective_offset;
 
-	size_t offset;
-	ret = pmem2_validate_offset(cfg, &offset);
-	if (ret)
-		return ret;
+	HANDLE map_handle = INVALID_HANDLE_VALUE;
+	if (src->type == PMEM2_SOURCE_HANDLE) {
+		map_handle = src->value.handle;
+	} else if (src->type == PMEM2_SOURCE_ANON) {
+		/* no extra settings */
+	} else {
+		ASSERT(0);
+	}
+
+	DWORD proto = PAGE_READWRITE;
+	DWORD access = FILE_MAP_ALL_ACCESS;
+
+	/* Unsupported flag combinations */
+	if ((cfg->protection_flag == PMEM2_PROT_NONE) ||
+			(cfg->protection_flag == PMEM2_PROT_WRITE) ||
+			(cfg->protection_flag == PMEM2_PROT_EXEC) ||
+			(cfg->protection_flag == (PMEM2_PROT_WRITE |
+					PMEM2_PROT_EXEC))) {
+		ERR("Windows does not support "
+				"this protection flag combination.");
+		return PMEM2_E_NOSUPP;
+	}
+
+	/* Translate protection flags into Windows flags */
+	if (cfg->protection_flag & PMEM2_PROT_WRITE) {
+		if (cfg->protection_flag & PMEM2_PROT_EXEC) {
+			proto = PAGE_EXECUTE_READWRITE;
+			access = FILE_MAP_READ | FILE_MAP_WRITE |
+			FILE_MAP_EXECUTE;
+		} else {
+			/*
+			 * Due to the already done exclusion
+			 * of incorrect combinations, PROT_WRITE
+			 * implies PROT_READ
+			 */
+			proto = PAGE_READWRITE;
+			access = FILE_MAP_READ | FILE_MAP_WRITE;
+		}
+	} else if (cfg->protection_flag & PMEM2_PROT_READ) {
+		if (cfg->protection_flag & PMEM2_PROT_EXEC) {
+			proto = PAGE_EXECUTE_READ;
+			access = FILE_MAP_READ | FILE_MAP_EXECUTE;
+		} else {
+			proto = PAGE_READONLY;
+			access = FILE_MAP_READ;
+		}
+	}
+
+	if (cfg->sharing == PMEM2_PRIVATE) {
+		if (cfg->protection_flag & PMEM2_PROT_EXEC) {
+			proto = PAGE_EXECUTE_WRITECOPY;
+			access = FILE_MAP_EXECUTE | FILE_MAP_COPY;
+		} else {
+			/*
+			 * If FILE_MAP_COPY is set,
+			 * protection is changed to read/write
+			 */
+			proto = PAGE_READONLY;
+			access = FILE_MAP_COPY;
+		}
+	}
 
 	/* create a file mapping handle */
-	DWORD access = FILE_MAP_ALL_ACCESS;
-	HANDLE mh = create_mapping(cfg->handle, offset, length,
-			PAGE_READWRITE, &err);
-	if (err == ERROR_ACCESS_DENIED) {
-		mh = create_mapping(cfg->handle, offset, length,
-				PAGE_READONLY, &err);
-		access = FILE_MAP_READ;
-	}
+	HANDLE mh = create_mapping(map_handle, effective_offset, length,
+		proto, &err);
 
 	if (!mh) {
 		if (err == ERROR_ALREADY_EXISTS) {
 			ERR("mapping already exists");
 			return PMEM2_E_MAPPING_EXISTS;
+		} else if (err == ERROR_ACCESS_DENIED) {
+			return PMEM2_E_NO_ACCESS;
 		}
-
 		return pmem2_lasterror_to_err();
 	}
+
+	ret = pmem2_config_validate_addr_alignment(cfg, src);
+	if (ret)
+		return ret;
+
+	/* let's get addr from cfg struct */
+	LPVOID addr_hint = cfg->addr;
 
 	/* obtain a pointer to the mapping view */
 	void *base = MapViewOfFileEx(mh,
 		access,
-		HIDWORD(offset),
-		LODWORD(offset),
+		HIDWORD(effective_offset),
+		LODWORD(effective_offset),
 		length,
-		NULL); /* hint address */
+		addr_hint); /* hint address */
 
 	if (base == NULL) {
 		ERR("!!MapViewOfFileEx");
-		ret = pmem2_lasterror_to_err();
+		if (cfg->addr_request == PMEM2_ADDRESS_FIXED_NOREPLACE) {
+			DWORD ret_windows = GetLastError();
+			if (ret_windows == ERROR_INVALID_ADDRESS)
+				ret = PMEM2_E_MAPPING_EXISTS;
+			else
+				ret = pmem2_lasterror_to_err();
+		}
+		else
+			ret = pmem2_lasterror_to_err();
 		goto err_close_mapping_handle;
 	}
 
@@ -211,15 +258,23 @@ pmem2_map(const struct pmem2_config *cfg, struct pmem2_map **map_ptr)
 		goto err_unmap_base;
 	}
 
-	int direct_access = is_direct_access(cfg->handle);
-	if (direct_access < 0) {
-		ret = direct_access;
-		goto err_unmap_base;
-	}
-
-	bool eADR = (pmem2_auto_flush() == 1);
 	enum pmem2_granularity available_min_granularity =
-		get_min_granularity(eADR, direct_access);
+		PMEM2_GRANULARITY_PAGE;
+	if (src->type == PMEM2_SOURCE_HANDLE) {
+		int direct_access = is_direct_access(src->value.handle);
+		if (direct_access < 0) {
+			ret = direct_access;
+			goto err_unmap_base;
+		}
+
+		bool eADR = (pmem2_auto_flush() == 1);
+		available_min_granularity =
+			get_min_granularity(eADR, direct_access, cfg->sharing);
+	} else if (src->type == PMEM2_SOURCE_ANON) {
+		available_min_granularity = PMEM2_GRANULARITY_BYTE;
+	} else {
+		ASSERT(0);
+	}
 
 	if (available_min_granularity > cfg->requested_max_granularity) {
 		const char *err = granularity_err_msg
@@ -250,8 +305,9 @@ pmem2_map(const struct pmem2_config *cfg, struct pmem2_map **map_ptr)
 	map->reserved_length = length;
 	map->content_length = length;
 	map->effective_granularity = available_min_granularity;
-	map->handle = cfg->handle;
+	map->source = *src;
 	pmem2_set_flush_fns(map);
+	pmem2_set_mem_fns(map);
 
 	ret = pmem2_register_mapping(map);
 	if (ret)

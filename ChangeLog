@@ -1,6 +1,34 @@
-Fri Jan 17 2020 Marcin Ślusarz <marcin.slusarz@intel.com>
+Fri Jun 19 2020 Piotr Balcer <piotr.balcer@intel.com>
 
-	* Version 1.8-rc1
+	* Version 1.9-rc1
+
+	This release:
+	- Switches the default instruction set for memcpy, memmove and memset
+	implementations on x86 to AVX512, and introduces numerous performance
+	improvements for those operations on AVX and SSE2 fallback paths.
+	- Optimizes transactional allocations in libpmemobj by avoiding one
+	extraneous cache miss and reducing the amount of work required to perform
+	a reservation.
+	- Introduces a new API in libpmemobj, pmemobj_tx_set_failure_behavior,
+	that enables the application to control the behavior of aborting
+	transactions.
+	- Improves performance of pool creation on Windows by avoiding expensive
+	physical page allocation during file allocation.
+
+	Other changes:
+	- pmem: mem[cpy|set] optimization when eADR is available
+	- obj: detect msync failures in non-pmem variants of mem[cpy|move|set]
+
+	Notable bug fixes:
+	- core: fix Last_errormsg_get when NO_LIBPTHREAD is defined
+	- pmem: read Unsafe Shutdown Count from region instead of interleave set
+	- common: fix deep_flushes failing on platforms that don't need them
+	- pmem: fix data cache flush on ppc64
+	- obj: fix run allocated recalculation
+
+Fri Jan 31 2020 Marcin Ślusarz <marcin.slusarz@intel.com>
+
+	* Version 1.8
 
 	This release:
 	- Introduces new API in libpmemobj for user-assisted defragmentation
@@ -24,6 +52,7 @@ Fri Jan 17 2020 Marcin Ślusarz <marcin.slusarz@intel.com>
 	- pool: rename -N --no-exec to -d --dry-run
 
 	Notable bug fixes:
+	- obj: fix zone size calculations
 	- obj: fix potential NULL-dereference in ulog_store
 	- obj: fix unintended recursive locking during palloc
 	- obj: fix lock release order in palloc publish
@@ -294,7 +323,7 @@ Fri Oct 26 2018 Marcin Ślusarz <marcin.slusarz@intel.com>
 	changed, which means that old pools have to be converted using pmdk-convert.
 	libpmemcto experiment has been finished and removed from the tree.
 
-	For more details, please see http://pmem.io/2018/10/22/release-1-5.html.
+	For more details, please see https://pmem.io/2018/10/22/release-1-5.html.
 
 	New features:
 	- common: unsafe shutdown detection (SDS)
@@ -391,7 +420,7 @@ Thu Mar 29 2018 Krzysztof Czurylo <krzysztof.czurylo@intel.com>
 	and it does not affect the names of the PMDK packages.
 	See this blog article for more details on the reasons and
 	impact of the name change:
-	http://pmem.io/2017/12/11/NVML-is-now-PMDK.html
+	https://pmem.io/2017/12/11/NVML-is-now-PMDK.html
 
 	New features:
 	- common: support for concatenated Device-DAX devices
@@ -644,7 +673,7 @@ Thu Dec 15 2016 Krzysztof Czurylo <krzysztof.czurylo@intel.com>
 	  or if the user does not want to use the file system for some reason.
 	- Add a package for libpmemobj C++ bindings.
 	  C++ API is no longer considered experimental.
-	  Web-based documentation for C++ API is available on http://pmem.io.
+	  Web-based documentation for C++ API is available on https://pmem.io.
 	- Add "sync" and "transform" commands to pmempool utility.
 	  The "sync" command allows one to recover missing or corrupted part(s)
 	  of a pool set from a healthy replica, while the "transform" command
@@ -718,7 +747,7 @@ Thu Jun 23 2016 Krzysztof Czurylo <krzysztof.czurylo@intel.com>
 
 	Experimental features:
 	- Implementation of C++ bindings for libpmempobj is complete.
-	  Web-based documentation for C++ API is available on http://pmem.io.
+	  Web-based documentation for C++ API is available on https://pmem.io.
 	  Note that C++ API is still considered experimental.  Do not use it
 	  in production environments.
 	- Porting NVML to Windows is in progress.  There are MS Visual Studio

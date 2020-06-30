@@ -1,34 +1,5 @@
-/*
- * Copyright 2015-2020, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2015-2020, Intel Corporation */
 
 /*
  * heap.c -- heap implementation
@@ -141,7 +112,7 @@ heap_arenas_fini(struct arenas *arenas)
 struct alloc_class_collection *
 heap_alloc_classes(struct palloc_heap *heap)
 {
-	return heap->rt->alloc_classes;
+	return heap->rt ? heap->rt->alloc_classes : NULL;
 }
 
 /*
@@ -429,9 +400,11 @@ zone_calc_size_idx(uint32_t zone_id, unsigned max_zone, size_t heap_size)
 	size_t zone_raw_size = heap_size - zone_id * ZONE_MAX_SIZE;
 
 	ASSERT(zone_raw_size >= (sizeof(struct zone_header) +
-			sizeof(struct chunk_header) * MAX_CHUNK));
+			sizeof(struct chunk_header) * MAX_CHUNK) +
+			sizeof(struct heap_header));
 	zone_raw_size -= sizeof(struct zone_header) +
-		sizeof(struct chunk_header) * MAX_CHUNK;
+		sizeof(struct chunk_header) * MAX_CHUNK +
+		sizeof(struct heap_header);
 
 	size_t zone_size_idx = zone_raw_size / CHUNKSIZE;
 	ASSERT(zone_size_idx <= UINT32_MAX);
@@ -450,8 +423,7 @@ heap_zone_init(struct palloc_heap *heap, uint32_t zone_id,
 	uint32_t size_idx = zone_calc_size_idx(zone_id, heap->rt->nzones,
 			*heap->sizep);
 
-	ASSERT(size_idx - first_chunk_id > 0);
-
+	ASSERT(size_idx > first_chunk_id);
 	memblock_huge_init(heap, first_chunk_id, zone_id,
 		size_idx - first_chunk_id);
 
@@ -479,10 +451,7 @@ static int
 heap_run_create(struct palloc_heap *heap, struct bucket *b,
 	struct memory_block *m)
 {
-	*m = memblock_run_init(heap,
-		m->chunk_id, m->zone_id, m->size_idx,
-		b->aclass->flags, b->aclass->unit_size,
-		b->aclass->run.alignment);
+	*m = memblock_run_init(heap, m->chunk_id, m->zone_id, &b->aclass->rdsc);
 
 	if (m->m_ops->iterate_free(m, heap_memblock_insert_block, b) != 0) {
 		b->c_ops->rm_all(b->container);
@@ -608,14 +577,14 @@ heap_reclaim_run(struct palloc_heap *heap, struct memory_block *m, int startup)
 		return e.free_space == b.nbits;
 	}
 
-	if (e.free_space == c->run.nallocs)
+	if (e.free_space == c->rdsc.nallocs)
 		return 1;
 
 	if (startup) {
 		STATS_INC(heap->stats, transient, heap_run_active,
 			m->size_idx * CHUNKSIZE);
 		STATS_INC(heap->stats, transient, heap_run_allocated,
-			c->run.nallocs - e.free_space);
+			(c->rdsc.nallocs - e.free_space) * run->hdr.block_size);
 	}
 
 	if (recycler_put(heap->rt->recyclers[c->id], m, e) < 0)
@@ -903,7 +872,7 @@ heap_ensure_run_bucket_filled(struct palloc_heap *heap, struct bucket *b,
 		goto out;
 
 	struct memory_block m = MEMORY_BLOCK_NONE;
-	m.size_idx = b->aclass->run.size_idx;
+	m.size_idx = b->aclass->rdsc.size_idx;
 
 	defb = heap_bucket_acquire(heap,
 		DEFAULT_ALLOC_CLASS_ID,
@@ -975,7 +944,7 @@ heap_split_block(struct palloc_heap *heap, struct bucket *b,
 		ASSERT((uint64_t)m->block_off + (uint64_t)units <= UINT32_MAX);
 		struct memory_block r = {m->chunk_id, m->zone_id,
 			m->size_idx - units, (uint32_t)(m->block_off + units),
-			NULL, NULL, 0, 0};
+			NULL, NULL, 0, 0, NULL};
 		memblock_rebuild_state(heap, &r);
 		if (bucket_insert_block(b, &r) != 0)
 			LOG(2,
@@ -1336,7 +1305,7 @@ heap_create_alloc_class_buckets(struct palloc_heap *heap, struct alloc_class *c)
 	struct heap_rt *h = heap->rt;
 
 	if (c->type == CLASS_RUN) {
-		h->recyclers[c->id] = recycler_new(heap, c->run.nallocs,
+		h->recyclers[c->id] = recycler_new(heap, c->rdsc.nallocs,
 			&heap->rt->arenas.nactive);
 		if (h->recyclers[c->id] == NULL)
 			goto error_recycler_new;
@@ -1462,6 +1431,7 @@ heap_zone_update_if_needed(struct palloc_heap *heap)
 
 		size_t size_idx = zone_calc_size_idx(i, heap->rt->nzones,
 			*heap->sizep);
+
 		if (size_idx == z->header.size_idx)
 			continue;
 

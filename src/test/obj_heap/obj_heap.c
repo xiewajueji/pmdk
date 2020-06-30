@@ -1,34 +1,5 @@
-/*
- * Copyright 2015-2019, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2015-2020, Intel Corporation */
 
 /*
  * obj_heap.c -- unit test for heap
@@ -407,6 +378,77 @@ test_heap(void)
 	MUNMAP_ANON_ALIGNED(mpop, MOCK_POOL_SIZE);
 }
 
+/*
+ * test_heap_with_size -- tests scenarios with not-nicely aligned sizes
+ */
+static void
+test_heap_with_size()
+{
+	/*
+	 * To trigger bug with incorrect metadata alignment we need to
+	 * use a size that uses exactly the size used in bugged zone size
+	 * calculations.
+	 */
+	size_t size = PMEMOBJ_MIN_POOL + sizeof(struct zone_header) +
+		sizeof(struct chunk_header) * MAX_CHUNK +
+		sizeof(PMEMobjpool);
+
+	struct mock_pop *mpop = MMAP_ANON_ALIGNED(size,
+		Ut_mmap_align);
+	PMEMobjpool *pop = &mpop->p;
+	memset(pop, 0, size);
+	pop->heap_offset = (uint64_t)((uint64_t)&mpop->heap - (uint64_t)mpop);
+	pop->p_ops.persist = obj_heap_persist;
+	pop->p_ops.flush = obj_heap_flush;
+	pop->p_ops.drain = obj_heap_drain;
+	pop->p_ops.memset = obj_heap_memset;
+	pop->p_ops.base = pop;
+	pop->set = MALLOC(sizeof(*(pop->set)));
+	pop->set->options = 0;
+	pop->set->directory_based = 0;
+
+	void *heap_start = (char *)pop + pop->heap_offset;
+	uint64_t heap_size = size - sizeof(PMEMobjpool);
+	struct palloc_heap *heap = &pop->heap;
+	struct pmem_ops *p_ops = &pop->p_ops;
+
+	UT_ASSERT(heap_check(heap_start, heap_size) != 0);
+	UT_ASSERT(heap_init(heap_start, heap_size,
+		&pop->heap_size, p_ops) == 0);
+	UT_ASSERT(heap_boot(heap, heap_start, heap_size,
+		&pop->heap_size,
+		pop, p_ops, NULL, pop->set) == 0);
+	UT_ASSERT(heap_buckets_init(heap) == 0);
+	UT_ASSERT(pop->heap.rt != NULL);
+
+	struct bucket *b_def = heap_bucket_acquire(heap,
+		DEFAULT_ALLOC_CLASS_ID, HEAP_ARENA_PER_THREAD);
+
+	struct memory_block mb;
+	mb.size_idx = 1;
+	while (heap_get_bestfit_block(heap, b_def, &mb) == 0)
+		;
+
+	/* mb should now be the last chunk in the heap */
+	char *ptr = mb.m_ops->get_real_data(&mb);
+	size_t s = mb.m_ops->get_real_size(&mb);
+
+	/* last chunk should be within the heap and accessible */
+	UT_ASSERT((size_t)ptr + s <= (size_t)mpop + size);
+
+	VALGRIND_DO_MAKE_MEM_DEFINED(ptr, s);
+	memset(ptr, 0xc, s);
+
+	heap_bucket_release(heap, b_def);
+
+	UT_ASSERT(heap_check(heap_start, heap_size) == 0);
+	heap_cleanup(heap);
+	UT_ASSERT(heap->rt == NULL);
+
+	FREE(pop->set);
+	MUNMAP_ANON_ALIGNED(mpop, size);
+}
+
 static void
 test_recycler(void)
 {
@@ -572,6 +614,7 @@ main(int argc, char *argv[])
 	switch (argv[1][0]) {
 	case 't':
 		test_heap();
+		test_heap_with_size();
 		test_recycler();
 		break;
 	case 'b':

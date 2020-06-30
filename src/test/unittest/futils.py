@@ -1,34 +1,5 @@
-#
-# Copyright 2019, Intel Corporation
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-#
-#     * Redistributions of source code must retain the above copyright
-#       notice, this list of conditions and the following disclaimer.
-#
-#     * Redistributions in binary form must reproduce the above copyright
-#       notice, this list of conditions and the following disclaimer in
-#       the documentation and/or other materials provided with the
-#       distribution.
-#
-#     * Neither the name of the copyright holder nor the names of its
-#       contributors may be used to endorse or promote products derived
-#       from this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright 2019-2020, Intel Corporation
 
 """Test framework utilities"""
 
@@ -82,14 +53,47 @@ def get_lib_dir(ctx):
         return RELEASE_LIBDIR
 
 
-def get_examples_dir(ctx):
+def get_example_path(ctx, libname, name):
+    """
+    Get the path to the example binary.
+    Paths to examples differ on Windows and Unix systems. On Windows,
+    the example binaries have a specific name: ex_libname_name.
+    On Unix systems, the example binaries are located in the catalog
+    "lib + libname/name" and have the same name as .c file.
+    """
     if sys.platform == 'win32':
+        binname = '_'.join(['ex', libname, name])
         if str(ctx.build) == 'debug':
-            return abspath(join(WIN_DEBUG_BUILDDIR, 'examples'))
+            return abspath(join(WIN_DEBUG_BUILDDIR, 'examples', binname))
         else:
-            return abspath(join(WIN_RELEASE_BUILDDIR, 'examples'))
+            return abspath(join(WIN_RELEASE_BUILDDIR, 'examples', binname))
     else:
-        return abspath(join(ROOTDIR, '..', 'examples'))
+        return abspath(join(ROOTDIR, '..', 'examples', 'lib' + libname,
+                            name, name))
+
+
+def tail(file, n):
+    """
+    Replace the file content with the n last lines from the existing file.
+    The original file is saved under the name with ".old" suffix.
+    """
+    with open(file, 'r') as f:
+        lines = f.readlines()
+        last_lines = lines[-n:]
+    os.rename(file, file + ".old")
+    with open(file, 'w') as f:
+        for line in last_lines:
+            f.write(line)
+
+
+def count(file, substring):
+    """
+    Count the number of occurrences of a string in the given file.
+    """
+    with open(file, 'r') as f:
+        content = f.read()
+
+    return content.count(substring)
 
 
 class Color:
@@ -141,6 +145,7 @@ def fail(msg, exit_code=None):
 
 class Skip(Exception):
     """Thrown when test should be skipped"""
+
     def __init__(self, msg):
         super().__init__(msg)
         config = configurator.Configurator().config

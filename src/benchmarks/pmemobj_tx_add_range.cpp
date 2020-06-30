@@ -1,34 +1,5 @@
-/*
- * Copyright 2019, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *      * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *      * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *      * Neither the name of the copyright holder nor the names of its
- *        contributors may be used to endorse or promote products derived
- *        from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2019-2020, Intel Corporation */
 
 /*
  * pmemobj_tx_add_range.cpp -- pmemobj_tx_add_range benchmarks definition
@@ -82,13 +53,13 @@ struct obj_bench_args {
  * obj_bench -- benchmark context
  */
 struct obj_bench {
-	PMEMobjpool *pop;	  /* persistent pool handle */
+	PMEMobjpool *pop;	   /* persistent pool handle */
 	struct ranged_obj *ranges; /* array of ranges */
 	size_t obj_size;	   /* size of a single range */
-	uint64_t nranges;	  /* number of ranges */
-	uint64_t nallocs;	  /* number of allocations */
-	bool shuffle_objs;	 /* shuffles array of ranges */
-	unsigned seed;		   /* PRNG seed */
+	uint64_t nranges;	   /* number of ranges */
+	uint64_t nallocs;	   /* number of allocations */
+	bool shuffle_objs;	   /* shuffles array of ranges */
+	rng_t rng;		   /* PRNG */
 };
 
 /*
@@ -96,13 +67,13 @@ struct obj_bench {
  * to avoid sequential pattern in the transaction loop
  */
 static void
-shuffle_ranges(struct ranged_obj *ranged, uint64_t nranges, unsigned *seed)
+shuffle_ranges(struct ranged_obj *ranged, uint64_t nranges, rng_t *rng)
 {
 	struct ranged_obj tmp;
 	uint64_t dest;
 
 	for (uint64_t n = 0; n < nranges; ++n) {
-		dest = RRAND_R(seed, nranges - 1, 0);
+		dest = RRAND_R(rng, nranges - 1, 0);
 		tmp = ranged[n];
 		ranged[n] = ranged[dest];
 		ranged[dest] = tmp;
@@ -144,7 +115,7 @@ init_ranges(struct obj_bench *ob)
 	}
 
 	if (ob->shuffle_objs == true)
-		shuffle_ranges(ob->ranges, ob->nranges, &ob->seed);
+		shuffle_ranges(ob->ranges, ob->nranges, &ob->rng);
 
 	return 0;
 
@@ -201,7 +172,7 @@ tx_add_range_init(struct benchmark *bench, struct benchmark_args *args)
 	ob->nranges = bargs->nranges;
 	ob->obj_size = args->dsize;
 	ob->shuffle_objs = bargs->shuffle_objs;
-	ob->seed = args->seed;
+	randomize_r(&ob->rng, args->seed);
 
 	if (init_ranges(ob))
 		goto err_pop_close;

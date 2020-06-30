@@ -1,54 +1,115 @@
-/*
- * Copyright 2019, IBM Corporation
- * Copyright 2019-2020, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2019, IBM Corporation */
+/* Copyright 2019-2020, Intel Corporation */
 
 #include <errno.h>
+#include <sys/mman.h>
 
 #include "out.h"
 #include "pmem2_arch.h"
-#include "platform_generic.h"
+#include "util.h"
 
 /*
- * Probe for valid ppc platforms via the 'ppc_platforms' array and perform its
- * initialization.
+ * Older assemblers versions do not support the latest versions of L, e.g.
+ * Binutils 2.34.
+ * Workaround this by using longs.
  */
+#define __SYNC(l) ".long (0x7c0004AC | ((" #l ") << 21))"
+#define __DCBF(ra, rb, l) ".long (0x7c0000AC | ((" #l ") << 21)"	\
+	" | ((" #ra ") << 16) | ((" #rb ") << 11))"
+
+static void
+ppc_fence(void)
+{
+	LOG(15, NULL);
+
+	/*
+	 * Force a memory barrier to flush out all cache lines.
+	 * Uses a heavyweight sync in order to guarantee the memory ordering
+	 * even with a data cache flush.
+	 * According to the POWER ISA 3.1, phwsync (aka. sync (L=4)) is treated
+	 * as a hwsync by processors compatible with previous versions of the
+	 * POWER ISA.
+	 */
+	asm volatile(__SYNC(4) : : : "memory");
+}
+
+static void
+ppc_fence_empty(void)
+{
+	LOG(15, NULL);
+}
+
+static void
+ppc_flush(const void *addr, size_t size)
+{
+	LOG(15, "addr %p size %zu", addr, size);
+
+	uintptr_t uptr = (uintptr_t)addr;
+	uintptr_t end = uptr + size;
+
+	/* round down the address */
+	uptr &= ~(CACHELINE_SIZE - 1);
+	while (uptr < end) {
+		/*
+		 * Flush the data cache block.
+		 * According to the POWER ISA 3.1, dcbstps (aka. dcbf (L=6))
+		 * behaves as dcbf (L=0) on previous processors.
+		 */
+		asm volatile(__DCBF(0, %0, 6) : :"r"(uptr) : "memory");
+
+		uptr += CACHELINE_SIZE;
+	}
+}
+
+static void
+ppc_flush_msync(const void *addr, size_t len)
+{
+	LOG(15, "addr %p len %zu", addr, len);
+	/* this implementation is copy of pmem_msync */
+
+	VALGRIND_DO_CHECK_MEM_IS_ADDRESSABLE(addr, len);
+
+	/*
+	 * msync requires addr to be a multiple of pagesize but there are no
+	 * requirements for len. Align addr down and change len so that
+	 * [addr, addr + len) still contains initial range.
+	 */
+
+	/* increase len by the amount we gain when we round addr down */
+	len += (uintptr_t)addr & (Pagesize - 1);
+
+	/* round addr down to page boundary */
+	uintptr_t uptr = (uintptr_t)addr & ~((uintptr_t)Pagesize - 1);
+
+	/*
+	 * msync accepts addresses aligned to page boundary, so we may sync
+	 * more and part of it may have been marked as undefined/inaccessible
+	 * Msyncing such memory is not a bug, so as a workaround temporarily
+	 * disable error reporting.
+	 */
+	VALGRIND_DO_DISABLE_ERROR_REPORTING;
+
+	if (msync((void *)uptr, len, MS_SYNC) < 0)
+		ERR("!msync");
+
+	VALGRIND_DO_ENABLE_ERROR_REPORTING;
+
+	/* full flush */
+	VALGRIND_DO_PERSIST(uptr, len);
+}
+
 void
 pmem2_arch_init(struct pmem2_arch_info *info)
 {
 	LOG(3, "libpmem*: PPC64 support");
 	LOG(3, "PMDK PPC64 support is currently experimental");
 	LOG(3, "Please don't use this library in production environment");
-
-	/* Init platform and to initialize the pmem funcs */
-	if (platform_init(info))
-		FATAL("Unable to init platform");
+	if (On_valgrind) {
+		info->fence = ppc_fence_empty;
+		info->flush = ppc_flush_msync;
+	} else {
+		info->fence = ppc_fence;
+		info->flush = ppc_flush;
+	}
 }

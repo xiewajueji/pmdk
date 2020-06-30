@@ -4,6 +4,7 @@ This document contains all the steps required to make a new release of PMDK.
 
 Make a release locally:
 - add an entry to ChangeLog, remember to change the day of the week in the release date
+  - for major releases mention compatibility with the previous release
 - update reference to stable release in README.md (update `git checkout tags/$VERSION-1`)
 - git rm GIT_VERSION
 - echo $VERSION > VERSION
@@ -13,6 +14,14 @@ Make a release locally:
 
 Make a package:
 - git archive --prefix="pmdk-$VERSION/" -o pmdk-$VERSION.tar.gz $VERSION
+- uncompress the created archive in a new directory and create the final package:
+```
+  $ cd pmdk-$VERSION
+  $ make doc
+  $ touch .skip-doc
+  $ cd ..
+  $ tar czf pmdk-$VERSION.tar.gz pmdk-$VERSION/ --owner=root --group=root
+```
 - verify the created archive (uncompress & build one last time)
 - gpg --armor --detach-sign pmdk-$VERSION.tar.gz
 
@@ -37,6 +46,6 @@ Publish package and make it official:
 - announce the release on pmem group
 
 Later, for major release:
-- bump version of Docker images (build-travis.sh, build-local.sh, build-image.sh, push-image.sh, pull-or-rebuild-image.sh) to $VERSION+1
+- bump version of Docker images (build-CI.sh, build-local.sh, build-image.sh, push-image.sh, pull-or-rebuild-image.sh) to $VERSION+1
 - add new branch to valid-branches.sh
 - once gh-pages contains new documentation, add $VERSION section in _data/releases_linux.yml and _data/releases_windows.yml on gh-pages branch

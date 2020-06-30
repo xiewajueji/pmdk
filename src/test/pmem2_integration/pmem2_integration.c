@@ -1,71 +1,26 @@
-/*
- * Copyright 2019-2020, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2019-2020, Intel Corporation */
 
 /*
  * pmem2_integration.c -- pmem2 integration tests
  */
 
+#include "libpmem2.h"
 #include "unittest.h"
-#include "ut_pmem2_utils.h"
+#include "rand.h"
+#include "ut_pmem2.h"
+#include "ut_pmem2_setup_integration.h"
 
 #define N_GRANULARITIES 3 /* BYTE, CACHE_LINE, PAGE */
-
-/*
- * prepare_config -- fill pmem2_config in minimal scope
- */
-static void
-prepare_config(struct pmem2_config **cfg, int fd,
-		enum pmem2_granularity granularity)
-{
-	int ret = pmem2_config_new(cfg);
-	UT_PMEM2_EXPECT_RETURN(ret, 0);
-
-	if (fd != -1) {
-		ret = pmem2_config_set_fd(*cfg, fd);
-		UT_PMEM2_EXPECT_RETURN(ret, 0);
-	}
-
-	ret = pmem2_config_set_required_store_granularity(*cfg, granularity);
-	UT_PMEM2_EXPECT_RETURN(ret, 0);
-}
 
 /*
  * map_invalid -- try to mapping memory with invalid config
  */
 static void
-map_invalid(struct pmem2_config *cfg, int result)
+map_invalid(struct pmem2_config *cfg, struct pmem2_source *src, int result)
 {
 	struct pmem2_map *map = (struct pmem2_map *)0x7;
-	int ret = pmem2_map(cfg, &map);
+	int ret = pmem2_map(cfg, src, &map);
 	UT_PMEM2_EXPECT_RETURN(ret, result);
 	UT_ASSERTeq(map, NULL);
 }
@@ -74,10 +29,10 @@ map_invalid(struct pmem2_config *cfg, int result)
  * map_valid -- return valid mapped pmem2_map and validate mapped memory length
  */
 static struct pmem2_map *
-map_valid(struct pmem2_config *cfg, size_t size)
+map_valid(struct pmem2_config *cfg, struct pmem2_source *src, size_t size)
 {
 	struct pmem2_map *map = NULL;
-	int ret = pmem2_map(cfg, &map);
+	int ret = pmem2_map(cfg, src, &map);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 	UT_ASSERTne(map, NULL);
 	UT_ASSERTeq(pmem2_map_get_size(map), size);
@@ -98,18 +53,21 @@ test_reuse_cfg(const struct test_case *tc, int argc, char *argv[])
 	int fd = OPEN(file, O_RDWR);
 
 	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd, PMEM2_GRANULARITY_PAGE);
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
 
 	size_t size;
-	UT_ASSERTeq(pmem2_config_get_file_size(cfg, &size), 0);
+	UT_ASSERTeq(pmem2_source_size(src, &size), 0);
 
-	struct pmem2_map *map1 = map_valid(cfg, size);
-	struct pmem2_map *map2 = map_valid(cfg, size);
+	struct pmem2_map *map1 = map_valid(cfg, src, size);
+	struct pmem2_map *map2 = map_valid(cfg, src, size);
 
 	/* cleanup after the test */
 	pmem2_unmap(&map2);
 	pmem2_unmap(&map1);
 	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
 	CLOSE(fd);
 
 	return 1;
@@ -129,88 +87,34 @@ test_reuse_cfg_with_diff_fd(const struct test_case *tc, int argc, char *argv[])
 	int fd1 = OPEN(file1, O_RDWR);
 
 	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd1, PMEM2_GRANULARITY_PAGE);
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd1,
+						PMEM2_GRANULARITY_PAGE);
 
 	size_t size1;
-	UT_ASSERTeq(pmem2_config_get_file_size(cfg, &size1), 0);
+	UT_ASSERTeq(pmem2_source_size(src, &size1), 0);
 
-	struct pmem2_map *map1 = map_valid(cfg, size1);
+	struct pmem2_map *map1 = map_valid(cfg, src, size1);
 
 	char *file2 = argv[1];
 	int fd2 = OPEN(file2, O_RDWR);
 
-	/* set another valid file descriptor in config */
-	int ret = pmem2_config_set_fd(cfg, fd2);
-	UT_PMEM2_EXPECT_RETURN(ret, 0);
+	/* set another valid file descriptor in source */
+	struct pmem2_source *src2;
+	UT_ASSERTeq(pmem2_source_from_fd(&src2, fd2), 0);
 
 	size_t size2;
-	UT_ASSERTeq(pmem2_config_get_file_size(cfg, &size2), 0);
+	UT_ASSERTeq(pmem2_source_size(src2, &size2), 0);
 
-	struct pmem2_map *map2 = map_valid(cfg, size2);
-
-	/* cleanup after the test */
-	pmem2_unmap(&map2);
-	CLOSE(fd2);
-	pmem2_unmap(&map1);
-	pmem2_config_delete(&cfg);
-	CLOSE(fd1);
-
-	return 2;
-}
-
-/*
- * test_dafault_fd -- try to map pmem2_map using the pmem2_config with default
- * file descriptor
- */
-static int
-test_default_fd(const struct test_case *tc, int argc, char *argv[])
-{
-	struct pmem2_config *cfg;
-	/* set invalid file descriptor in config */
-	prepare_config(&cfg, -1, PMEM2_GRANULARITY_PAGE);
-
-	map_invalid(cfg, PMEM2_E_FILE_HANDLE_NOT_SET);
-
-	/* cleanup after the test */
-	pmem2_config_delete(&cfg);
-
-	return 0;
-}
-
-/*
- * test_invalid_fd -- try to change pmem2_config (unsuccessful) and
- * map pmem2_map again
- */
-static int
-test_invalid_fd(const struct test_case *tc, int argc, char *argv[])
-{
-	if (argc < 2)
-		UT_FATAL("usage: test_invalid_fd <file> <file2>");
-
-	char *file1 = argv[0];
-	int fd1 = OPEN(file1, O_RDWR);
-
-	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd1, PMEM2_GRANULARITY_PAGE);
-
-	size_t size1;
-	UT_ASSERTeq(pmem2_config_get_file_size(cfg, &size1), 0);
-
-	struct pmem2_map *map1 = map_valid(cfg, size1);
-
-	char *file2 = argv[1];
-	int fd2 = OPEN(file2, O_WRONLY);
-
-	/* attempt to set O_WRONLY file descriptor - expect failure */
-	int ret = pmem2_config_set_fd(cfg, fd2);
-	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_INVALID_FILE_HANDLE);
-	struct pmem2_map *map2 = map_valid(cfg, size1);
+	struct pmem2_map *map2 = map_valid(cfg, src2, size2);
 
 	/* cleanup after the test */
 	pmem2_unmap(&map2);
 	CLOSE(fd2);
 	pmem2_unmap(&map1);
 	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
+	pmem2_source_delete(&src2);
 	CLOSE(fd1);
 
 	return 2;
@@ -230,12 +134,14 @@ test_register_pmem(const struct test_case *tc, int argc, char *argv[])
 	char *word = "XXXXXXXX";
 
 	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd, PMEM2_GRANULARITY_PAGE);
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
 
 	size_t size;
-	UT_ASSERTeq(pmem2_config_get_file_size(cfg, &size), 0);
+	UT_ASSERTeq(pmem2_source_size(src, &size), 0);
 
-	struct pmem2_map *map = map_valid(cfg, size);
+	struct pmem2_map *map = map_valid(cfg, src, size);
 
 	char *addr = pmem2_map_get_address(map);
 	size_t length = strlen(word);
@@ -245,6 +151,7 @@ test_register_pmem(const struct test_case *tc, int argc, char *argv[])
 	/* cleanup after the test */
 	pmem2_unmap(&map);
 	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
 	CLOSE(fd);
 
 	return 1;
@@ -264,17 +171,22 @@ test_use_misc_lens_and_offsets(const struct test_case *tc,
 	int fd = OPEN(file, O_RDWR);
 
 	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd, PMEM2_GRANULARITY_PAGE);
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
 
 	size_t len;
-	UT_ASSERTeq(pmem2_config_get_file_size(cfg, &len), 0);
+	UT_ASSERTeq(pmem2_source_size(src, &len), 0);
 
-	struct pmem2_map *map = map_valid(cfg, len);
+	struct pmem2_map *map = map_valid(cfg, src, len);
 	char *base = pmem2_map_get_address(map);
+	pmem2_persist_fn persist_fn = pmem2_get_persist_fn(map);
 
-	unsigned seed = 13; /* arbitrarily chosen value */
+	rng_t rng;
+	randomize_r(&rng, 13); /* arbitrarily chosen value */
 	for (size_t i = 0; i < len; i++)
-		base[i] = os_rand_r(&seed);
+		base[i] = (char)rnd64_r(&rng);
+	persist_fn(base, len);
 
 	UT_ASSERTeq(len % Ut_mmap_align, 0);
 	for (size_t l = len; l > 0; l -= Ut_mmap_align) {
@@ -286,7 +198,7 @@ test_use_misc_lens_and_offsets(const struct test_case *tc,
 			ret = pmem2_config_set_offset(cfg, off);
 			UT_PMEM2_EXPECT_RETURN(ret, 0);
 
-			struct pmem2_map *map2 = map_valid(cfg, len2);
+			struct pmem2_map *map2 = map_valid(cfg, src, len2);
 			char *ptr = pmem2_map_get_address(map2);
 
 			UT_ASSERTeq(ret = memcmp(base + off, ptr, len2), 0);
@@ -295,13 +207,15 @@ test_use_misc_lens_and_offsets(const struct test_case *tc,
 	}
 	pmem2_unmap(&map);
 	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
 	CLOSE(fd);
 	return 1;
 }
 
 struct gran_test_ctx;
 
-typedef void(*map_func)(struct pmem2_config *cfg, struct gran_test_ctx *ctx);
+typedef void(*map_func)(struct pmem2_config *cfg,
+	struct pmem2_source *src, struct gran_test_ctx *ctx);
 
 /*
  * gran_test_ctx -- essential parameters used by granularity test
@@ -316,10 +230,11 @@ struct gran_test_ctx {
  * includes cleanup
  */
 static void
-map_with_avail_gran(struct pmem2_config *cfg, struct gran_test_ctx *ctx)
+map_with_avail_gran(struct pmem2_config *cfg,
+	struct pmem2_source *src, struct gran_test_ctx *ctx)
 {
 	struct pmem2_map *map;
-	int ret = pmem2_map(cfg, &map);
+	int ret = pmem2_map(cfg, src, &map);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 	UT_ASSERTne(map, NULL);
 	UT_ASSERTeq(ctx->expected_granularity,
@@ -334,10 +249,11 @@ map_with_avail_gran(struct pmem2_config *cfg, struct gran_test_ctx *ctx)
  * (unsuccessful)
  */
 static void
-map_with_unavail_gran(struct pmem2_config *cfg, struct gran_test_ctx *unused)
+map_with_unavail_gran(struct pmem2_config *cfg,
+	struct pmem2_source *src, struct gran_test_ctx *unused)
 {
 	struct pmem2_map *map;
-	int ret = pmem2_map(cfg, &map);
+	int ret = pmem2_map(cfg, src, &map);
 	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_GRANULARITY_NOT_SUPPORTED);
 	UT_ERR("%s", pmem2_errormsg());
 	UT_ASSERTeq(map, NULL);
@@ -379,7 +295,7 @@ test_granularity(const struct test_case *tc, int argc, char *argv[])
 	if (argc < 3)
 		UT_FATAL(
 		"usage: test_granularity <file>"
-				" <available_granularity> <requested_granularity>");
+			" <available_granularity> <requested_granularity>");
 
 	struct gran_test_ctx ctx;
 
@@ -393,11 +309,14 @@ test_granularity(const struct test_case *tc, int argc, char *argv[])
 	int fd = OPEN(file, O_RDWR);
 
 	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd, gran_id2granularity[req_gran_id]);
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+					gran_id2granularity[req_gran_id]);
 
-	ctx.map_with_expected_gran(cfg, &ctx);
+	ctx.map_with_expected_gran(cfg, src, &ctx);
 
 	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
 	CLOSE(fd);
 
 	return 3;
@@ -416,14 +335,15 @@ test_len_not_aligned(const struct test_case *tc, int argc, char *argv[])
 	int fd = OPEN(file, O_RDWR);
 
 	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd, PMEM2_GRANULARITY_PAGE);
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
 
 	size_t len, alignment;
-	int ret = pmem2_config_get_file_size(cfg, &len);
+	int ret = pmem2_source_size(src, &len);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 
-	ret = pmem2_config_get_alignment(cfg, &alignment);
-	UT_PMEM2_EXPECT_RETURN(ret, 0);
+	PMEM2_SOURCE_ALIGNMENT(src, &alignment);
 
 	UT_ASSERT(len > alignment);
 	size_t aligned_len = ALIGN_DOWN(len, alignment);
@@ -432,9 +352,11 @@ test_len_not_aligned(const struct test_case *tc, int argc, char *argv[])
 	ret = pmem2_config_set_length(cfg, unaligned_len);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 
-	map_invalid(cfg, PMEM2_E_LENGTH_UNALIGNED);
+	map_invalid(cfg, src, PMEM2_E_LENGTH_UNALIGNED);
 
 	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
+
 	CLOSE(fd);
 
 	return 1;
@@ -453,14 +375,15 @@ test_len_aligned(const struct test_case *tc, int argc, char *argv[])
 	int fd = OPEN(file, O_RDWR);
 
 	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd, PMEM2_GRANULARITY_PAGE);
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
 
 	size_t len, alignment;
-	int ret = pmem2_config_get_file_size(cfg, &len);
+	int ret = pmem2_source_size(src, &len);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 
-	ret = pmem2_config_get_alignment(cfg, &alignment);
-	UT_PMEM2_EXPECT_RETURN(ret, 0);
+	PMEM2_SOURCE_ALIGNMENT(src, &alignment);
 
 	UT_ASSERT(len > alignment);
 	size_t aligned_len = ALIGN_DOWN(len, alignment);
@@ -468,10 +391,12 @@ test_len_aligned(const struct test_case *tc, int argc, char *argv[])
 	ret = pmem2_config_set_length(cfg, aligned_len);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 
-	struct pmem2_map *map = map_valid(cfg, aligned_len);
+	struct pmem2_map *map = map_valid(cfg, src, aligned_len);
 
 	pmem2_unmap(&map);
 	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
+
 	CLOSE(fd);
 
 	return 1;
@@ -490,14 +415,15 @@ test_offset_not_aligned(const struct test_case *tc, int argc, char *argv[])
 	int fd = OPEN(file, O_RDWR);
 
 	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd, PMEM2_GRANULARITY_PAGE);
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
 
 	size_t len, alignment;
-	int ret = pmem2_config_get_file_size(cfg, &len);
+	int ret = pmem2_source_size(src, &len);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 
-	ret = pmem2_config_get_alignment(cfg, &alignment);
-	UT_PMEM2_EXPECT_RETURN(ret, 0);
+	PMEM2_SOURCE_ALIGNMENT(src, &alignment);
 
 	/* break the offset */
 	size_t offset = alignment - 1;
@@ -511,9 +437,11 @@ test_offset_not_aligned(const struct test_case *tc, int argc, char *argv[])
 	ret = pmem2_config_set_length(cfg, aligned_len - alignment);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 
-	map_invalid(cfg, PMEM2_E_OFFSET_UNALIGNED);
+	map_invalid(cfg, src, PMEM2_E_OFFSET_UNALIGNED);
 
 	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
+
 	CLOSE(fd);
 
 	return 1;
@@ -532,14 +460,15 @@ test_offset_aligned(const struct test_case *tc, int argc, char *argv[])
 	int fd = OPEN(file, O_RDWR);
 
 	struct pmem2_config *cfg;
-	prepare_config(&cfg, fd, PMEM2_GRANULARITY_PAGE);
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
 
 	size_t len, alignment;
-	int ret = pmem2_config_get_file_size(cfg, &len);
+	int ret = pmem2_source_size(src, &len);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 
-	ret = pmem2_config_get_alignment(cfg, &alignment);
-	UT_PMEM2_EXPECT_RETURN(ret, 0);
+	PMEM2_SOURCE_ALIGNMENT(src, &alignment);
 
 	/* set the aligned offset */
 	size_t offset = alignment;
@@ -548,15 +477,381 @@ test_offset_aligned(const struct test_case *tc, int argc, char *argv[])
 
 	UT_ASSERT(len > alignment * 2);
 	/* set the aligned len */
-	size_t map_len = ALIGN_DOWN(len, alignment) / 2;
+	size_t map_len = ALIGN_DOWN(len / 2, alignment);
 	ret = pmem2_config_set_length(cfg, map_len);
 	UT_PMEM2_EXPECT_RETURN(ret, 0);
 
-	struct pmem2_map *map = map_valid(cfg, map_len);
+	struct pmem2_map *map = map_valid(cfg, src, map_len);
 
 	pmem2_unmap(&map);
 	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
 	CLOSE(fd);
+
+	return 1;
+}
+
+/*
+ * test_mem_move_cpy_set_with_map_private -- map O_RDONLY file and do
+ * pmem2_[cpy|set|move]_fns with PMEM2_PRIVATE sharing
+ */
+static int
+test_mem_move_cpy_set_with_map_private(const struct test_case *tc, int argc,
+					char *argv[])
+{
+	if (argc < 1)
+		UT_FATAL(
+			"usage: test_mem_move_cpy_set_with_map_private <file>");
+
+	char *file = argv[0];
+	int fd = OPEN(file, O_RDONLY);
+	const char *word1 = "Persistent memory...";
+	const char *word2 = "Nonpersistent memory";
+	const char *word3 = "XXXXXXXXXXXXXXXXXXXX";
+
+	struct pmem2_config *cfg;
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
+	pmem2_config_set_sharing(cfg, PMEM2_PRIVATE);
+
+	size_t size = 0;
+	UT_ASSERTeq(pmem2_source_size(src, &size), 0);
+	struct pmem2_map *map = map_valid(cfg, src, size);
+
+	char *addr = pmem2_map_get_address(map);
+
+	/* copy inital state */
+	char *initial_state = MALLOC(size);
+	memcpy(initial_state, addr, size);
+
+	pmem2_memmove_fn memmove_fn = pmem2_get_memmove_fn(map);
+	pmem2_memcpy_fn memcpy_fn = pmem2_get_memcpy_fn(map);
+	pmem2_memset_fn memset_fn = pmem2_get_memset_fn(map);
+
+	memcpy_fn(addr, word1, strlen(word1), 0);
+	UT_ASSERTeq(strcmp(addr, word1), 0);
+
+	memmove_fn(addr, word2, strlen(word2), 0);
+	UT_ASSERTeq(strcmp(addr, word2), 0);
+
+	memset_fn(addr, 'X', strlen(word3), 0);
+	UT_ASSERTeq(strcmp(addr, word3), 0);
+
+	/* remap memory, and check that the data has not been saved */
+	pmem2_unmap(&map);
+	map = map_valid(cfg, src, size);
+	addr = pmem2_map_get_address(map);
+	UT_ASSERTeq(strcmp(addr, initial_state), 0);
+
+	/* cleanup after the test */
+	pmem2_unmap(&map);
+	FREE(initial_state);
+	pmem2_config_delete(&cfg);
+	pmem2_source_delete(&src);
+	CLOSE(fd);
+
+	return 1;
+}
+
+/*
+ * test_deep_flush_valid -- perform valid deep_flush for whole map
+ */
+static int
+test_deep_flush_valid(const struct test_case *tc, int argc, char *argv[])
+{
+	char *file = argv[0];
+	int fd = OPEN(file, O_RDWR);
+
+	struct pmem2_config *cfg;
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
+
+	size_t len;
+	PMEM2_SOURCE_SIZE(src, &len);
+
+	struct pmem2_map *map = map_valid(cfg, src, len);
+
+	char *addr = pmem2_map_get_address(map);
+	pmem2_persist_fn persist_fn = pmem2_get_persist_fn(map);
+	memset(addr, 0, len);
+	persist_fn(addr, len);
+
+	int ret = pmem2_deep_flush(map, addr, len);
+	UT_PMEM2_EXPECT_RETURN(ret, 0);
+
+	pmem2_unmap(&map);
+	PMEM2_CONFIG_DELETE(&cfg);
+	PMEM2_SOURCE_DELETE(&src);
+	CLOSE(fd);
+
+	return 1;
+}
+
+/*
+ * test_deep_flush_e_range_behind -- try deep_flush for range behind a map
+ */
+static int
+test_deep_flush_e_range_behind(const struct test_case *tc,
+	int argc, char *argv[])
+{
+	char *file = argv[0];
+	int fd = OPEN(file, O_RDWR);
+
+	struct pmem2_config *cfg;
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
+
+	size_t len;
+	PMEM2_SOURCE_SIZE(src, &len);
+
+	struct pmem2_map *map = map_valid(cfg, src, len);
+
+	size_t map_size = pmem2_map_get_size(map);
+	char *addr = pmem2_map_get_address(map);
+	pmem2_persist_fn persist_fn = pmem2_get_persist_fn(map);
+	memset(addr, 0, len);
+	persist_fn(addr, len);
+
+	int ret = pmem2_deep_flush(map, addr + map_size + 1, 64);
+	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_DEEP_FLUSH_RANGE);
+
+	pmem2_unmap(&map);
+	PMEM2_CONFIG_DELETE(&cfg);
+	PMEM2_SOURCE_DELETE(&src);
+	CLOSE(fd);
+
+	return 1;
+}
+
+/*
+ * test_deep_flush_e_range_before -- try deep_flush for range before a map
+ */
+static int
+test_deep_flush_e_range_before(const struct test_case *tc,
+	int argc, char *argv[])
+{
+	char *file = argv[0];
+	int fd = OPEN(file, O_RDWR);
+
+	struct pmem2_config *cfg;
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
+
+	size_t len;
+	PMEM2_SOURCE_SIZE(src, &len);
+
+	struct pmem2_map *map = map_valid(cfg, src, len);
+
+	size_t map_size = pmem2_map_get_size(map);
+	char *addr = pmem2_map_get_address(map);
+	pmem2_persist_fn persist_fn = pmem2_get_persist_fn(map);
+	memset(addr, 0, len);
+	persist_fn(addr, len);
+
+	int ret = pmem2_deep_flush(map, addr - map_size, 64);
+	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_DEEP_FLUSH_RANGE);
+
+	pmem2_unmap(&map);
+	PMEM2_CONFIG_DELETE(&cfg);
+	PMEM2_SOURCE_DELETE(&src);
+	CLOSE(fd);
+
+	return 1;
+}
+
+/*
+ * test_deep_flush_slice -- try deep_flush for slice of a map
+ */
+static int
+test_deep_flush_slice(const struct test_case *tc, int argc, char *argv[])
+{
+	char *file = argv[0];
+	int fd = OPEN(file, O_RDWR);
+
+	struct pmem2_config *cfg;
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
+
+	size_t len;
+	PMEM2_SOURCE_SIZE(src, &len);
+
+	struct pmem2_map *map = map_valid(cfg, src, len);
+
+	size_t map_size = pmem2_map_get_size(map);
+	size_t map_part = map_size / 4;
+	char *addr = pmem2_map_get_address(map);
+	pmem2_persist_fn persist_fn = pmem2_get_persist_fn(map);
+	memset(addr, 0, map_part);
+	persist_fn(addr, map_part);
+
+	int ret = pmem2_deep_flush(map, addr + map_part, map_part);
+	UT_PMEM2_EXPECT_RETURN(ret, 0);
+
+	pmem2_unmap(&map);
+	PMEM2_CONFIG_DELETE(&cfg);
+	PMEM2_SOURCE_DELETE(&src);
+	CLOSE(fd);
+
+	return 1;
+}
+
+/*
+ * test_deep_flush_overlap -- try deep_flush for range overlaping map
+ */
+static int
+test_deep_flush_overlap(const struct test_case *tc, int argc, char *argv[])
+{
+	char *file = argv[0];
+	int fd = OPEN(file, O_RDWR);
+
+	struct pmem2_config *cfg;
+	struct pmem2_source *src;
+	PMEM2_PREPARE_CONFIG_INTEGRATION(&cfg, &src, fd,
+						PMEM2_GRANULARITY_PAGE);
+
+	size_t len;
+	PMEM2_SOURCE_SIZE(src, &len);
+
+	struct pmem2_map *map = map_valid(cfg, src, len);
+
+	size_t map_size = pmem2_map_get_size(map);
+	char *addr = pmem2_map_get_address(map);
+	pmem2_persist_fn persist_fn = pmem2_get_persist_fn(map);
+	memset(addr, 0, len);
+	persist_fn(addr, len);
+
+	int ret = pmem2_deep_flush(map, addr + 1024, map_size);
+	UT_PMEM2_EXPECT_RETURN(ret, PMEM2_E_DEEP_FLUSH_RANGE);
+
+	pmem2_unmap(&map);
+	PMEM2_CONFIG_DELETE(&cfg);
+	PMEM2_SOURCE_DELETE(&src);
+	CLOSE(fd);
+
+	return 1;
+}
+
+/*
+ * test_source_anon -- tests map/config/source functions in combination
+ *	with anonymous source.
+ */
+static int
+test_source_anon(enum pmem2_sharing_type sharing,
+	enum pmem2_granularity granularity,
+	size_t source_len, size_t map_len)
+{
+	int ret = 0;
+	struct pmem2_config *cfg;
+	struct pmem2_source *src;
+	struct pmem2_map *map;
+	struct pmem2_badblock_context *bbctx;
+
+	UT_ASSERTeq(pmem2_source_from_anon(&src, source_len), 0);
+
+	UT_ASSERTeq(pmem2_source_device_id(src, NULL, NULL), PMEM2_E_NOSUPP);
+	UT_ASSERTeq(pmem2_source_device_usc(src, NULL), PMEM2_E_NOSUPP);
+	UT_ASSERTeq(pmem2_badblock_context_new(src, &bbctx), PMEM2_E_NOSUPP);
+	size_t alignment;
+	UT_ASSERTeq(pmem2_source_alignment(src, &alignment), 0);
+	UT_ASSERT(alignment >= Ut_pagesize);
+	size_t size;
+	UT_ASSERTeq(pmem2_source_size(src, &size), 0);
+	UT_ASSERTeq(size, source_len);
+
+	PMEM2_CONFIG_NEW(&cfg);
+
+	UT_ASSERTeq(pmem2_config_set_length(cfg, map_len), 0);
+	UT_ASSERTeq(pmem2_config_set_offset(cfg, alignment), 0); /* ignored */
+	UT_ASSERTeq(pmem2_config_set_required_store_granularity(cfg,
+		granularity), 0);
+	UT_ASSERTeq(pmem2_config_set_sharing(cfg, sharing), 0);
+
+	if ((ret = pmem2_map(cfg, src, &map)) != 0)
+		goto map_fail;
+
+	void *addr = pmem2_map_get_address(map);
+	UT_ASSERTne(addr, NULL);
+	UT_ASSERTeq(pmem2_map_get_size(map), map_len ? map_len : source_len);
+	UT_ASSERTeq(pmem2_map_get_store_granularity(map),
+		PMEM2_GRANULARITY_BYTE);
+
+	UT_ASSERTeq(pmem2_deep_flush(map, addr, alignment), PMEM2_E_NOSUPP);
+
+	UT_ASSERTeq(pmem2_unmap(&map), 0);
+
+map_fail:
+	PMEM2_CONFIG_DELETE(&cfg);
+	pmem2_source_delete(&src);
+
+	return ret;
+}
+
+/*
+ * test_source_anon_ok_private -- valid config /w private flag
+ */
+static int
+test_source_anon_private(const struct test_case *tc, int argc, char *argv[])
+{
+	int ret = test_source_anon(PMEM2_PRIVATE, PMEM2_GRANULARITY_BYTE,
+		1 << 30ULL, 1 << 20ULL);
+	UT_ASSERTeq(ret, 0);
+
+	return 1;
+}
+
+/*
+ * test_source_anon_shared -- valid config /w shared flag
+ */
+static int
+test_source_anon_shared(const struct test_case *tc, int argc, char *argv[])
+{
+	int ret = test_source_anon(PMEM2_SHARED, PMEM2_GRANULARITY_BYTE,
+		1 << 30ULL, 1 << 20ULL);
+	UT_ASSERTeq(ret, 0);
+
+	return 1;
+}
+
+/*
+ * test_source_anon_page -- valid config /w page granularity
+ */
+static int
+test_source_anon_page(const struct test_case *tc, int argc, char *argv[])
+{
+	int ret = test_source_anon(PMEM2_SHARED, PMEM2_GRANULARITY_PAGE,
+		1 << 30ULL, 1 << 20ULL);
+	UT_ASSERTeq(ret, 0);
+
+	return 1;
+}
+
+/*
+ * test_source_anon_zero_len -- valid config /w zero (src inherited) map length
+ */
+static int
+test_source_anon_zero_len(const struct test_case *tc, int argc, char *argv[])
+{
+	int ret = test_source_anon(PMEM2_SHARED, PMEM2_GRANULARITY_BYTE,
+		1 << 30ULL, 0);
+	UT_ASSERTeq(ret, 0);
+
+	return 1;
+}
+
+/*
+ * test_source_anon_too_small -- valid config /w small mapping length
+ */
+static int
+test_source_anon_too_small(const struct test_case *tc, int argc, char *argv[])
+{
+	int ret = test_source_anon(PMEM2_SHARED, PMEM2_GRANULARITY_BYTE,
+		1 << 30ULL, 1 << 10ULL);
+	UT_ASSERTne(ret, 0);
 
 	return 1;
 }
@@ -567,8 +862,6 @@ test_offset_aligned(const struct test_case *tc, int argc, char *argv[])
 static struct test_case test_cases[] = {
 	TEST_CASE(test_reuse_cfg),
 	TEST_CASE(test_reuse_cfg_with_diff_fd),
-	TEST_CASE(test_default_fd),
-	TEST_CASE(test_invalid_fd),
 	TEST_CASE(test_register_pmem),
 	TEST_CASE(test_use_misc_lens_and_offsets),
 	TEST_CASE(test_granularity),
@@ -576,6 +869,17 @@ static struct test_case test_cases[] = {
 	TEST_CASE(test_len_aligned),
 	TEST_CASE(test_offset_not_aligned),
 	TEST_CASE(test_offset_aligned),
+	TEST_CASE(test_mem_move_cpy_set_with_map_private),
+	TEST_CASE(test_deep_flush_valid),
+	TEST_CASE(test_deep_flush_e_range_behind),
+	TEST_CASE(test_deep_flush_e_range_before),
+	TEST_CASE(test_deep_flush_slice),
+	TEST_CASE(test_deep_flush_overlap),
+	TEST_CASE(test_source_anon_private),
+	TEST_CASE(test_source_anon_shared),
+	TEST_CASE(test_source_anon_page),
+	TEST_CASE(test_source_anon_too_small),
+	TEST_CASE(test_source_anon_zero_len),
 };
 
 #define NTESTS (sizeof(test_cases) / sizeof(test_cases[0]))

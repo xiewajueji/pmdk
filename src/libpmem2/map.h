@@ -1,34 +1,5 @@
-/*
- * Copyright 2019-2020, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2019-2020, Intel Corporation */
 
 /*
  * map.h -- internal definitions for libpmem2
@@ -39,6 +10,8 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "libpmem2.h"
+#include "os.h"
+#include "source.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -47,6 +20,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef int (*pmem2_deep_flush_fn)(struct pmem2_map *map,
+		void *ptr, size_t size);
 
 struct pmem2_map {
 	void *addr; /* base address */
@@ -58,20 +34,25 @@ struct pmem2_map {
 	pmem2_persist_fn persist_fn;
 	pmem2_flush_fn flush_fn;
 	pmem2_drain_fn drain_fn;
+	pmem2_deep_flush_fn deep_flush_fn;
 
-#ifdef _WIN32
-	HANDLE handle;
-#endif
+	pmem2_memmove_fn memmove_fn;
+	pmem2_memcpy_fn memcpy_fn;
+	pmem2_memset_fn memset_fn;
+
+	struct pmem2_source source;
 };
 
-enum pmem2_granularity get_min_granularity(bool eADR, bool is_pmem);
+enum pmem2_granularity get_min_granularity(bool eADR, bool is_pmem,
+					enum pmem2_sharing_type sharing);
 struct pmem2_map *pmem2_map_find(const void *addr, size_t len);
 int pmem2_register_mapping(struct pmem2_map *map);
 int pmem2_unregister_mapping(struct pmem2_map *map);
 void pmem2_map_init(void);
 void pmem2_map_fini(void);
 
-int pmem2_validate_offset(const struct pmem2_config *cfg, size_t *offset);
+int pmem2_validate_offset(const struct pmem2_config *cfg,
+	size_t *offset, size_t alignment);
 
 #ifdef __cplusplus
 }

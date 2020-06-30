@@ -37,7 +37,7 @@ Summary:	__PACKAGE_SUMMARY__
 Packager:	__PACKAGE_MAINTAINER__
 Group:		__GROUP_SYS_LIBS__
 License:	__LICENSE__
-URL:		http://pmem.io/pmdk
+URL:		https://pmem.io/pmdk
 
 Source0:	%{name}-%{version}.tar.gz
 
@@ -85,7 +85,7 @@ BuildRequires:	libfabric-devel >= %{min_libfabric_ver}
 # https://bugzilla.redhat.com/show_bug.cgi?id=1340636
 # https://bugzilla.redhat.com/show_bug.cgi?id=1340637
 
-ExclusiveArch: x86_64
+ExclusiveArch: x86_64 ppc64le
 
 %description
 The Persistent Memory Development Kit is a collection of libraries for

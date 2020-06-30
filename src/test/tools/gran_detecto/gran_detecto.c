@@ -1,34 +1,5 @@
-/*
- * Copyright 2019, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2019-2020, Intel Corporation */
 
 /*
  * gran_detecto.c -- detect available store/flush granularity
@@ -199,13 +170,13 @@ prepare_file(struct tool_ctx *ctx)
 {
 	ctx->fd = os_open(ctx->path, O_TMPFILE | O_RDWR, 0640);
 	if (ctx->fd < 0) {
-		perror("os_open failed");
+		perror("os_open");
 		return;
 	}
 
 	int ret = os_ftruncate(ctx->fd, 16 * KILOBYTE);
 	if (ret) {
-		perror("os_ftruncate failed");
+		perror("os_ftruncate");
 		goto cleanup_file;
 	}
 
@@ -220,24 +191,24 @@ prepare_file(struct tool_ctx *ctx)
 {
 	ctx->probe_file_path = malloc(PATH_MAX * sizeof(char));
 	if (!ctx->probe_file_path) {
-		perror("malloc failed");
+		perror("malloc");
 		return;
 	}
 
 	int ret = snprintf(ctx->probe_file_path, PATH_MAX,
 			"%s" OS_DIR_SEP_STR "temp_grandetecto", ctx->path);
 	if (ret < 0) {
-		perror("snprintf failed");
+		perror("snprintf");
 		goto cleanup_file;
 	} else if (ret >= PATH_MAX) {
 		fprintf(stderr,
-			"snprintf failed: number of characters exceeds PATH_MAX.\n");
+			"snprintf: number of characters exceeds PATH_MAX.\n");
 		goto cleanup_file;
 	}
 
 	ctx->fd = os_open(ctx->probe_file_path, O_CREAT | O_RDWR, 0640);
 	if (ctx->fd < 0) {
-		perror("os_open failed");
+		perror("os_open");
 		ctx->fd = NOT_SET_FD;
 		goto cleanup_file;
 	}
@@ -246,7 +217,7 @@ prepare_file(struct tool_ctx *ctx)
 			"This file was created by gran_detecto. It can be safely removed.";
 	ssize_t sret = util_write(ctx->fd, message, strlen(message));
 	if (sret == -1) {
-		perror("util_write failed");
+		perror("util_write");
 		goto cleanup_file;
 	}
 
@@ -271,42 +242,41 @@ gran_detecto(struct tool_ctx *ctx)
 	/* fill config in minimal scope */
 	struct pmem2_config *cfg;
 	if (pmem2_config_new(&cfg)) {
-		fprintf(stderr, "pmem2_config_new failed: %s\n",
-				pmem2_errormsg());
+		pmem2_perror("pmem2_config_new");
 		ret = 1;
 		goto cleanup_file;
 	}
 
-	if (pmem2_config_set_fd(cfg, ctx->fd)) {
-		fprintf(stderr, "pmem2_config_set_fd failed: %s\n",
-				pmem2_errormsg());
+	struct pmem2_source *src;
+	if (pmem2_source_from_fd(&src, ctx->fd)) {
+		pmem2_perror("pmem2_source_from_fd");
 		ret = 1;
 		goto free_config;
 	}
 
 	if (pmem2_config_set_required_store_granularity(cfg,
 			PMEM2_GRANULARITY_PAGE)) {
-		fprintf(stderr,
-			"pmem2_config_set_required_store_granularity failed: %s\n",
-			pmem2_errormsg());
+		pmem2_perror("pmem2_config_set_required_store_granularity");
 		ret = 1;
-		goto free_config;
+		goto free_both;
 	}
 
 	struct pmem2_map *map;
-	if (pmem2_map(cfg, &map)) {
-		fprintf(stderr, "pmem2_map failed: %s\n", pmem2_errormsg());
+	if (pmem2_map(cfg, src, &map)) {
+		pmem2_perror("pmem2_map");
 		ret = 1;
-		goto free_config;
+		goto free_both;
 	}
 
 	ctx->actual_granularity = pmem2_map_get_store_granularity(map);
 
 	if (pmem2_unmap(&map)) {
-		fprintf(stderr, "pmem2_unmap failed: %s\n", pmem2_errormsg());
+		pmem2_perror("pmem2_unmap");
 		ret = 1;
 	}
 
+free_both:
+	pmem2_source_delete(&src);
 free_config:
 	pmem2_config_delete(&cfg);
 cleanup_file:

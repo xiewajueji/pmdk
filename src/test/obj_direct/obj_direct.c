@@ -1,34 +1,5 @@
-/*
- * Copyright 2015-2019, Intel Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in
- *       the documentation and/or other materials provided with the
- *       distribution.
- *
- *     * Neither the name of the copyright holder nor the names of its
- *       contributors may be used to endorse or promote products derived
- *       from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
+// SPDX-License-Identifier: BSD-3-Clause
+/* Copyright 2015-2020, Intel Corporation */
 
 /*
  * obj_direct.c -- unit test for pmemobj_direct()
@@ -91,8 +62,8 @@ main(int argc, char *argv[])
 
 	util_mutex_init(&lock1);
 	util_mutex_init(&lock2);
-	os_cond_init(&sync_cond1);
-	os_cond_init(&sync_cond2);
+	util_cond_init(&sync_cond1);
+	util_cond_init(&sync_cond2);
 	cond1 = cond2 = 0;
 
 	PMEMobjpool **pops = MALLOC(npools * sizeof(PMEMobjpool *));
@@ -138,7 +109,7 @@ main(int argc, char *argv[])
 	UT_ASSERTne(obj_direct(thread_oid), NULL);
 
 	os_thread_t t;
-	PTHREAD_CREATE(&t, NULL, test_worker, NULL);
+	THREAD_CREATE(&t, NULL, test_worker, NULL);
 
 	/* wait for the worker thread to perform the first check */
 	util_mutex_lock(&lock1);
@@ -162,9 +133,9 @@ main(int argc, char *argv[])
 	os_cond_signal(&sync_cond2);
 	util_mutex_unlock(&lock2);
 
-	PTHREAD_JOIN(&t, NULL);
-	os_cond_destroy(&sync_cond1);
-	os_cond_destroy(&sync_cond2);
+	THREAD_JOIN(&t, NULL);
+	util_cond_destroy(&sync_cond1);
+	util_cond_destroy(&sync_cond2);
 	util_mutex_destroy(&lock1);
 	util_mutex_destroy(&lock2);
 	FREE(pops);

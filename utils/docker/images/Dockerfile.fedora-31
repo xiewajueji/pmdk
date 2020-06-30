@@ -1,33 +1,5 @@
-#
-# Copyright 2016-2018, Intel Corporation
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions
-# are met:
-#
-#     * Redistributions of source code must retain the above copyright
-#       notice, this list of conditions and the following disclaimer.
-#
-#     * Redistributions in binary form must reproduce the above copyright
-#       notice, this list of conditions and the following disclaimer in
-#       the documentation and/or other materials provided with the
-#       distribution.
-#
-#     * Neither the name of the copyright holder nor the names of its
-#       contributors may be used to endorse or promote products derived
-#       from this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# SPDX-License-Identifier: BSD-3-Clause
+# Copyright 2016-2020, Intel Corporation
 
 #
 # Dockerfile - a 'recipe' for Docker to build an image of fedora-based
@@ -36,63 +8,100 @@
 
 # Pull base image
 FROM fedora:31
-MAINTAINER marcin.slusarz@intel.com
+MAINTAINER piotr.balcer@intel.com
 
-# Install basic tools
-RUN dnf update -y
-
-# tests
-ENV TESTS_DEPS "bc \
-	gdb \
-	ndctl \
-	strace"
-
-RUN dnf install -y \
+# libfabric (optional if libfabric-dev >= 1.4.2 is installed)
+ENV FABRIC_DEPS "\
 	autoconf \
 	automake \
-	clang \
-	daxctl-devel \
+	libtool \
+	wget"
+
+ENV VALGRIND_DEPS "\
+	autoconf \
+	automake \
 	file \
 	findutils \
+	git"
+
+# pmdk base
+ENV BASE_DEPS "\
+	git \
+	daxctl-devel \
+	make \
+	ndctl-devel \
+	pkgconfig"
+
+# benchmarks (optional)
+ENV BENCH_DEPS "\
+	glib2-devel"
+
+# examples (optional)
+ENV EXAMPLES_DEPS "\
 	fuse \
 	fuse-devel \
-	gcc \
-	git \
-	glib2-devel \
-	hub \
-	lbzip2 \
-	libtool \
-	libunwind-devel \
-	libuv-devel \
-	make \
-	man \
 	ncurses-devel \
-	ndctl-devel \
+	libuv-devel"
+
+# documentation (optional)
+ENV DOC_DEPS "\
+	pandoc"
+
+# tests
+ENV TESTS_DEPS "\
+	bc \
+	gdb \
+	libunwind-devel \
+	ndctl \
 	openssh-server \
-	pandoc \
-	pkgconfig \
-	python3-flake8 \
+	strace"
+
+# packaging
+ENV PACKAGING_DEPS "\
 	rpm-build \
 	rpm-build-libs \
-	rpmdevtools \
+	rpmdevtools"
+
+# Coverity
+ENV COVERITY_DEPS "\
+	gcc \
+	wget"
+
+# misc
+ENV MISC_DEPS "\
+	clang \
+	hub \
+	lbzip2 \
+	man \
+	python3-flake8 \
 	rsync \
 	shadow-utils \
 	sudo \
 	tar \
-	wget \
 	which \
-	xmlto \
-	$TESTS_DEPS
+	xmlto"
 
-RUN dnf clean all
-
-# Install valgrind
+# Copy install valgrind script
 COPY install-valgrind.sh install-valgrind.sh
-RUN ./install-valgrind.sh
 
-# Install libfabric
+# Copy install libfabric script
 COPY install-libfabric.sh install-libfabric.sh
-RUN ./install-libfabric.sh fedora
+
+RUN dnf update -y && dnf install -y \
+	$FABRIC_DEPS \
+	$VALGRIND_DEPS \
+	$BASE_DEPS \
+	$BENCH_DEPS \
+	$EXAMPLES_DEPS \
+	$DOC_DEPS \
+	$TESTS_DEPS \
+	$PACKAGING_DEPS \
+	$COVERITY_DEPS \
+	$MISC_DEPS \
+	$TESTS_DEPS \
+	&& ./install-valgrind.sh fedora \
+	&& ./install-libfabric.sh fedora \
+	&& dnf clean all
 
 # Add user
 ENV USER pmdkuser
@@ -100,6 +109,7 @@ ENV USERPASS pmdkpass
 RUN useradd -m $USER
 RUN echo "$USER:$USERPASS" | chpasswd
 RUN gpasswd wheel -a $USER
+RUN echo "%wheel ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 USER $USER
 
 # Set required environment variables
@@ -108,4 +118,3 @@ ENV OS_VER 31
 ENV START_SSH_COMMAND /usr/sbin/sshd
 ENV PACKAGE_MANAGER rpm
 ENV NOTTY 1
-

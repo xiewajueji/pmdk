@@ -1,13 +1,14 @@
 # **PMDK: Persistent Memory Development Kit**
 
-[![Build Status](https://travis-ci.org/pmem/pmdk.svg?branch=master)](https://travis-ci.org/pmem/pmdk)
-[![Build status](https://ci.appveyor.com/api/projects/status/u2l1db7ucl5ktq10/branch/master?svg=true&pr=false)](https://ci.appveyor.com/project/pmem/pmdk/branch/master)
-[![Build status](https://api.cirrus-ci.com/github/pmem/pmdk.svg)](https://cirrus-ci.com/github/pmem/pmdk/master)
+[![Travis build status](https://travis-ci.org/pmem/pmdk.svg?branch=master)](https://travis-ci.org/pmem/pmdk)
+[![GHA build status](https://github.com/pmem/pmdk/workflows/PMDK/badge.svg?branch=master)](https://github.com/pmem/pmdk/actions)
+[![Appveyor build status](https://ci.appveyor.com/api/projects/status/u2l1db7ucl5ktq10/branch/master?svg=true&pr=false)](https://ci.appveyor.com/project/pmem/pmdk/branch/master)
+[![Cirrus build status](https://api.cirrus-ci.com/github/pmem/pmdk.svg)](https://cirrus-ci.com/github/pmem/pmdk/master)
 [![Coverity Scan Build Status](https://img.shields.io/coverity/scan/3015.svg)](https://scan.coverity.com/projects/pmem-pmdk)
 [![PMDK release version](https://img.shields.io/github/release/pmem/pmdk.svg?sort=semver)](https://github.com/pmem/pmdk/releases/latest)
 [![Coverage Status](https://codecov.io/github/pmem/pmdk/coverage.svg?branch=master)](https://codecov.io/gh/pmem/pmdk/branch/master)
 
-The **Persistent Memory Development Kit (PMDK)** is a collection of libraries and tools for System Administrators and Application Developers to simplify managing and accessing persistent memory devices. For more information, see http://pmem.io.
+The **Persistent Memory Development Kit (PMDK)** is a collection of libraries and tools for System Administrators and Application Developers to simplify managing and accessing persistent memory devices. For more information, see https://pmem.io.
 
 To install PMDK libraries, either install pre-built packages, which we build for every stable release, or clone the tree and build it yourself. **Pre-built** packages can be found in popular Linux distribution package repositories, or you can check out our recent stable releases on our [github release page](https://github.com/pmem/pmdk/releases). Specific installation instructions are outlined below.
 
@@ -35,26 +36,26 @@ Bugs and feature requests for this repo are tracked in our [GitHub Issues Databa
 
 ## Libraries and Utilities
 Available Libraries:
-- [libpmem](http://pmem.io/pmdk/libpmem/):  provides low level persistent memory support
+- [libpmem](https://pmem.io/pmdk/libpmem/):  provides low level persistent memory support
 
-- [libpmemobj](http://pmem.io/pmdk/libpmemobj/):  provides a transactional object store, providing memory allocation, transactions, and general facilities for persistent memory programming.
+- [libpmemobj](https://pmem.io/pmdk/libpmemobj/):  provides a transactional object store, providing memory allocation, transactions, and general facilities for persistent memory programming.
 
-- [libpmemblk](http://pmem.io/pmdk/libpmemblk/):  supports arrays of pmem-resident blocks, all the same size, that are atomically updated.
+- [libpmemblk](https://pmem.io/pmdk/libpmemblk/):  supports arrays of pmem-resident blocks, all the same size, that are atomically updated.
 
-- [libpmemlog](http://pmem.io/pmdk/libpmemlog/):  provides a pmem-resident log file.
+- [libpmemlog](https://pmem.io/pmdk/libpmemlog/):  provides a pmem-resident log file.
 
-- [libpmempool](http://pmem.io/pmdk/libpmempool/):  provides support for off-line pool management and diagnostics.
+- [libpmempool](https://pmem.io/pmdk/libpmempool/):  provides support for off-line pool management and diagnostics.
 
-- [librpmem](http://pmem.io/pmdk/librpmem/)<sup>1</sup>:  provides low-level support for remote access to persistent memory utilizing RDMA-capable RNICs.
+- [librpmem](https://pmem.io/pmdk/librpmem/)<sup>1</sup>:  provides low-level support for remote access to persistent memory utilizing RDMA-capable RNICs.
 
 If you're looking for *libvmem* and *libvmmalloc*, they have been moved to a
 [separate repository](https://github.com/pmem/vmem).
 
 Available Utilities:
 
-- [pmempool](http://pmem.io/pmdk/pmempool/): Manage and analyze persistent memory pools with this stand-alone utility
+- [pmempool](https://pmem.io/pmdk/pmempool/): Manage and analyze persistent memory pools with this stand-alone utility
 
-- [pmemcheck](http://pmem.io/2015/07/17/pmemcheck-basic.html): Use dynamic runtime analysis with an enhanced version of Valgrind for use with persistent memory.
+- [pmemcheck](https://pmem.io/2015/07/17/pmemcheck-basic.html): Use dynamic runtime analysis with an enhanced version of Valgrind for use with persistent memory.
 
 Currently these libraries only work on 64-bit Linux, Windows<sup>2</sup>, and 64-bit FreeBSD 11+<sup>3</sup>.
 For information on how these libraries are licensed, see our [LICENSE](LICENSE) file.
@@ -137,7 +138,7 @@ see https://github.com/pmem/pmdk/issues/4207.
 ### Windows
 
 * **MS Visual Studio 2015**
-* [Windows SDK 10.0.16299.15](https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk)
+* [Windows SDK 10.0.17134.12](https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk)
 * **perl** (i.e. [StrawberryPerl](http://strawberryperl.com/))
 * **PowerShell 5**
 
@@ -165,7 +166,7 @@ To build from source, clone this tree:
 
 For a stable version, checkout a [release tag](https://github.com/pmem/pmdk/releases) as follows. Otherwise skip this step to build the latest development release.
 ```
-	$ git checkout tags/1.7
+	$ git checkout tags/1.8
 ```
 
 Once the build system is setup, the Persistent Memory Development Kit is built using the `make` command at the top level:
@@ -378,6 +379,6 @@ are only validated to "early access" quality with Cortex-A53 processor.
 ## Contact Us
 
 For more information on this library, contact
-Marcin Slusarz (marcin.slusarz@intel.com),
+Piotr Balcer (piotr.balcer@intel.com),
 Andy Rudoff (andy.rudoff@intel.com), or post to our
-[Google group](http://groups.google.com/group/pmem).
+[Google group](https://groups.google.com/group/pmem).

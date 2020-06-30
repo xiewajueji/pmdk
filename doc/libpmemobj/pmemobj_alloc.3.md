@@ -7,32 +7,8 @@ header: PMDK
 date: pmemobj API version 2.3
 ...
 
+[comment]: <> (SPDX-License-Identifier: BSD-3-Clause
 [comment]: <> (Copyright 2017-2020, Intel Corporation)
-
-[comment]: <> (Redistribution and use in source and binary forms, with or without)
-[comment]: <> (modification, are permitted provided that the following conditions)
-[comment]: <> (are met:)
-[comment]: <> (    * Redistributions of source code must retain the above copyright)
-[comment]: <> (      notice, this list of conditions and the following disclaimer.)
-[comment]: <> (    * Redistributions in binary form must reproduce the above copyright)
-[comment]: <> (      notice, this list of conditions and the following disclaimer in)
-[comment]: <> (      the documentation and/or other materials provided with the)
-[comment]: <> (      distribution.)
-[comment]: <> (    * Neither the name of the copyright holder nor the names of its)
-[comment]: <> (      contributors may be used to endorse or promote products derived)
-[comment]: <> (      from this software without specific prior written permission.)
-
-[comment]: <> (THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS)
-[comment]: <> ("AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT)
-[comment]: <> (LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR)
-[comment]: <> (A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT)
-[comment]: <> (OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,)
-[comment]: <> (SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT)
-[comment]: <> (LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,)
-[comment]: <> (DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY)
-[comment]: <> (THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT)
-[comment]: <> ((INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE)
-[comment]: <> (OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.)
 
 [comment]: <> (pmemobj_alloc.3 -- man page for non-transactional atomic allocations)
 
@@ -46,7 +22,7 @@ date: pmemobj API version 2.3
 
 **pmemobj_alloc**(), **pmemobj_xalloc**(), **pmemobj_zalloc**(),
 **pmemobj_realloc**(), **pmemobj_zrealloc**(), **pmemobj_strdup**(),
-**pmemobj_wcsdup**(), **pmemobj_alloc_usable_size**(),
+**pmemobj_wcsdup**(), **pmemobj_alloc_usable_size**(), **pmemobj_defrag**(),
 **POBJ_NEW**(), **POBJ_ALLOC**(), **POBJ_ZNEW**(), **POBJ_ZALLOC**(),
 **POBJ_REALLOC**(), **POBJ_ZREALLOC**(), **POBJ_FREE**()
 - non-transactional atomic allocations
@@ -98,10 +74,13 @@ failure or system crash, on recovery they are guaranteed to be entirely complete
 or discarded, leaving the persistent memory heap and internal object containers
 in a consistent state.
 
-All these functions can be used outside transactions. Note that operations
-performed using the non-transactional API are considered durable after
-completion, even if executed within an open transaction. Such non-transactional
-changes will not be rolled back if the transaction is aborted or interrupted.
+All these functions should be used outside transactions. If executed within
+an open transaction they are considered durable immediately after completion.
+Changes made with these functions will not be rolled back if the transaction
+is aborted or interrupted. They have no information about other changes made
+by transactional API, so if the same data is modified in a single transaction
+using transactional and then non-transactional API, transaction abort
+will likely corrupt the data.
 
 The allocations are always aligned to a cache-line boundary.
 
@@ -297,4 +276,4 @@ through due to lack of resources), -1 is returned.
 
 **free**(3), **POBJ_FOREACH**(3), **realloc**(3),
 **strdup**(3), **wcsdup**(3), **libpmemobj**(7)
-and **<http://pmem.io>**
+and **<https://pmem.io>**
