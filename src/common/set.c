@@ -2658,7 +2658,7 @@ util_replica_map_local_addr(struct pool_set *set, unsigned repidx, int flags, vo
 
 		/* map the first part and reserve space for remaining parts */
 		if (util_map_part(&rep->part[0], addr, rep->resvsize, 0,
-				flags | MAP_FIXED_NOREPLACE, 0) != 0) {
+				flags, 0) != 0) {
 			LOG(2, "pool mapping failed - replica #%u part #0",
 				repidx);
 			return -1;
