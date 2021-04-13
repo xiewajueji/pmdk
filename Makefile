@@ -71,7 +71,7 @@ RPM_BUILDDIR=rpmbuild
 DPKG_BUILDDIR=dpkgbuild
 EXPERIMENTAL ?= n
 BUILD_PACKAGE_CHECK ?= y
-BUILD_RPMEM ?= y
+BUILD_RPMEM ?= n
 TEST_CONFIG_FILE ?= "$(CURDIR)"/src/test/testconfig.sh
 
 rpm : override DESTDIR="$(CURDIR)/$(RPM_BUILDDIR)"
